@@ -149,9 +149,22 @@ export async function generateMapKitJsToken(
   return `${signingInput}.${encodedSignature}`
 }
 
+/** True if the string is a JWT whose `exp` is still in the future (MapKit JS bootstrap). */
+function isUnexpiredMapKitJwt(token: string): boolean {
+  try {
+    const parts = token.split('.')
+    if (parts.length !== 3 || !parts[1]) return false
+    const payload = JSON.parse(atob(parts[1])) as { exp?: number }
+    return typeof payload.exp === 'number' && payload.exp > Date.now() / 1000
+  } catch {
+    return false
+  }
+}
+
 /**
  * Get a MapKit JS token for the given origin (e.g. http://localhost:3000).
- * Uses APPLE_SECRET_KEY, APPLE_TEAM_ID, APPLE_KEY_ID from runtime config.
+ * Uses APPLE_SECRET_KEY, APPLE_TEAM_ID, APPLE_KEY_ID from runtime config when set;
+ * otherwise returns a non-expired `public.mapkitToken` (MAPKIT_TOKEN / APPLE_MAPKIT_TOKEN) if present.
  * Use from a server route so the client can pass the token to mapkit.init().
  */
 export async function getMapKitJsToken(event: H3Event, origin: string): Promise<string> {
@@ -160,14 +173,22 @@ export async function getMapKitJsToken(event: H3Event, origin: string): Promise<
   const teamId = (config as Record<string, string>).appleTeamId || ''
   const keyId = (config as Record<string, string>).appleKeyId || ''
 
-  if (!privateKeyPem || !teamId || !keyId) {
-    throw new Error(
-      'MapKit JS token requires APPLE_SECRET_KEY, APPLE_TEAM_ID, and APPLE_KEY_ID in environment.',
-    )
+  if (privateKeyPem && teamId && keyId) {
+    const privateKey = await importPrivateKey(privateKeyPem)
+    return generateMapKitJsToken(privateKey, teamId, keyId, origin)
   }
 
-  const privateKey = await importPrivateKey(privateKeyPem)
-  return generateMapKitJsToken(privateKey, teamId, keyId, origin)
+  const publicToken = String(
+    (config as { public?: { mapkitToken?: string } }).public?.mapkitToken ?? '',
+  )
+  if (publicToken.startsWith('eyJ') && isUnexpiredMapKitJwt(publicToken)) {
+    return publicToken
+  }
+
+  throw new Error(
+    'MapKit JS: set APPLE_SECRET_KEY, APPLE_TEAM_ID, and APPLE_KEY_ID to sign tokens for this origin, ' +
+      'or set a non-expired MAPKIT_TOKEN / APPLE_MAPKIT_TOKEN (JWT) for mapkit.init().',
+  )
 }
 
 /**

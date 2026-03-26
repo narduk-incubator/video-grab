@@ -11,8 +11,8 @@ project-specific patterns at lint time.
   building.
 - These plugins run in Node.js (not on Cloudflare Workers) — Node.js APIs are
   allowed here.
-- See the ESLint Plugins table in the root [AGENTS.md](../../AGENTS.md) for the
-  full rule inventory.
+- See [docs/agents/engineering.md](../../docs/agents/engineering.md) for the
+  shared guardrail inventory and repo-wide lint expectations.
 
 ## Plugins
 

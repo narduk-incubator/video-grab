@@ -1,0 +1,8 @@
+# Copy to `doppler.yaml` in this directory (gitignored). Then `pnpm run dev:showcase`
+# and other `doppler run -- …` scripts use the right project/config.
+#
+# Replace `project` with your Doppler app name before local Doppler commands.
+# Narduk hub: `narduk-nuxt-template` (dev config should include APPLE_* for MapKit showcase).
+setup:
+  project: narduk-nuxt-template
+  config: dev

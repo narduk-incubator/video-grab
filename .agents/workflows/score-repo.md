@@ -70,8 +70,10 @@ Audit GitHub Actions workflows for correctness and completeness.
 
 1. **Workflow inventory** // turbo
    - Run `ls .github/workflows/`
-   - Expect: `ci.yml` (quality-only), `version-bump.yml`,
-     `weekly-drift-check.yml` (minimum)
+   - Expect `ci.yml` everywhere; the template repo also carries
+     `weekly-drift-check.yml` and reusable workflow files. Provisioning runs
+     only from the control-plane repo (`provision-app.yml` lives there, not in
+     the template). Derived apps may intentionally trim that set.
 
 2. **CI (pull requests)**
    - Must run: `pnpm install --frozen-lockfile`, lint, typecheck
@@ -85,9 +87,11 @@ Audit GitHub Actions workflows for correctness and completeness.
      (uncommitted changes)
    - `pnpm run ship` script must exist in root package.json
 
-4. **Layer publishing**
-   - Must auto-bump version and publish on layer changes (template repo only)
-   - Commit message should include `[skip ci]` to avoid deploy loops
+4. **Shared package publishing**
+   - Shared packages (for example `narduk-eslint-config`) must publish from
+     their own repository workflow, not from this template repo
+   - Local rollout should update package versions in the template, then sync the
+     fleet
 
 **Scoring:** 10 = all checks pass. -1 for each: missing workflow, no build in
 CI, wrong cache paths, no concurrency control, no path guards, no dirty-repo
@@ -212,10 +216,11 @@ off, no security plugin, no prelint auto-build.
 
 Audit developer experience infrastructure.
 
-1. **Init script** // turbo
-   - Run `wc -l tools/init.ts`
-   - Must be idempotent (check for --repair mode)
-   - Must provision: D1, Doppler, GitHub secrets, analytics
+1. **Provisioning** // turbo
+   - No monolithic `tools/init.ts` — new apps use the control plane +
+     `provision-app.yml` on the control-plane repo (`tools/provision/*.ts`,
+     `5-hydrate-repo.ts`)
+   - Docs must state control plane as the only provisioning path
 
 2. **Validate script**
    - `tools/validate.ts` must exist
@@ -263,21 +268,24 @@ Audit example app quality and documentation.
 
 1. **Example inventory** // turbo
    - Run `ls apps/ | grep example`
-   - Expect: auth, blog, dashboard, marketing (minimum)
+   - In the template repo, expect `example-auth`, `example-blog`,
+     `example-marketing`, `example-og-image`, and `example-apple-maps`
 
 2. **Per-app README** // turbo
    - Run `find apps/ -name 'README.md' -maxdepth 2 | head -10`
    - Each example must have a README explaining what it demonstrates
 
-3. **Service Bindings**
-   - Showcase gateway must use Service Bindings for routing
-   - Dispatch middleware must exist
+3. **Showcase routing model**
+   - Showcase should be a simple landing page that links to independently
+     deployed example apps
+   - There should be no routing proxy or Service Bindings requirement
 
 4. **Completeness**
    - Auth: register, login, logout, me
    - Blog: content directory, list page, detail page
-   - Dashboard: sidebar layout, auth middleware
    - Marketing: hero, pricing, testimonials, contact
+   - OG image: dynamic image generation route or recipe
+   - Apple Maps: token wiring and map integration example
 
 **Scoring:** 10 = all checks pass. -1 for each: missing example, missing README,
 incomplete feature set.
@@ -441,8 +449,8 @@ migration failures.
      `grep -rn "@nuxt/ui-pro\|@import.*ui-pro" apps/ layers/ --include='*.css' --include='*.ts' --include='*.vue' | grep -v 'node_modules' | head -10`
    - `@nuxt/ui-pro` is unified into `@nuxt/ui` in v4 — any
      `@import '@nuxt/ui-pro'` must be replaced with `@import '@nuxt/ui'`
-   - `@nuxt/ui-pro` module registration must be removed (all Pro components are
-     included in `@nuxt/ui` v4)
+   - `@nuxt/ui-pro` module registration must be removed (the page/dashboard
+     primitives now ship inside `@nuxt/ui` v4)
 
 4. **CSS import order** // turbo
    - Run `head -5 layers/narduk-nuxt-layer/app/assets/css/main.css`
@@ -490,19 +498,20 @@ migration failures.
     - `@nuxt/ui-pro` is unified into `@nuxt/ui` in v4 — a separate
       `@nuxt/ui-pro` dependency must be removed
 
-11. **Pro Component Adoption** // turbo
+11. **Page-Building Component Adoption** // turbo
     - Run
       `grep -rnl 'PageHero\|PageSection\|PageFeature\|PageCTA\|DashboardGroup\|DashboardSidebar\|PricingPlan\|AuthForm\|BlogPost' apps/ layers/ --include='*.vue' | grep -v 'node_modules' | head -15`
-    - Nuxt UI v4 includes 110+ components including powerful Pro layout
-      primitives (Dashboard*, Page*, Pricing*, Blog*, Auth\*). Landing pages
-      should use `PageHero`, `PageSection`, `PageFeature`, `PageCTA`. Admin
-      dashboards should use `DashboardGroup`, `DashboardSidebar`,
-      `DashboardPanel`. Flag apps that build these patterns with custom divs.
+    - Nuxt UI v4 includes the Dashboard\*, Page\*, Pricing\*, Blog\*, and Auth\*
+      primitives. Landing pages should use `PageHero`, `PageSection`,
+      `PageFeature`, `PageCTA`. Admin dashboards should use `DashboardGroup`,
+      `DashboardSidebar`, `DashboardPanel`. Flag apps that build these patterns
+      with custom divs.
 
 **Scoring:** 10 = all checks pass. -1 for each: deprecated component name, old
 prop syntax, legacy CSS import, wrong import order, legacy color tokens,
 `@apply` with semantic classes, stale model modifiers, old utility paths,
-unguarded refresh handler, stale ui-pro dependency, no Pro component adoption.
+unguarded refresh handler, stale ui-pro dependency, no page-building component
+adoption.
 
 ## 15. Accessibility (Target: 10/10)
 

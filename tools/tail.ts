@@ -1,4 +1,4 @@
-#!/usr/bin/env npx tsx
+#!/usr/bin/env -S pnpm exec tsx
 /**
  * tail.ts — Tail logs for the current fleet app
  *
@@ -6,7 +6,7 @@
  * using `wrangler tail`.
  *
  * Usage:
- *   npx tsx tools/tail.ts
+ *   pnpm exec tsx tools/tail.ts
  */
 
 import { spawn } from 'node:child_process'

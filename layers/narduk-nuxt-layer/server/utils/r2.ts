@@ -58,7 +58,7 @@ export function useR2(event: H3Event, bindingName = 'BUCKET'): R2Bucket {
 export async function uploadToR2(
   event: H3Event,
   key: string,
-  data: ArrayBuffer | ReadableStream | string,
+  data: ArrayBuffer | ArrayBufferView | ReadableStream | string,
   contentType?: string,
   bindingName = 'BUCKET',
 ): Promise<string> {
@@ -77,4 +77,45 @@ export async function deleteFromR2(
 ): Promise<void> {
   const r2 = useR2(event, bindingName)
   await r2.delete(key)
+}
+
+/**
+ * Read an R2 object and return its content as a base64-encoded string.
+ * Returns null if the object doesn't exist.
+ */
+export async function readR2AsBase64(
+  event: H3Event,
+  key: string,
+  bindingName = 'BUCKET',
+): Promise<string | null> {
+  const r2 = useR2(event, bindingName)
+  const obj = await r2.get(key)
+  if (!obj) return null
+
+  const buf = await obj.arrayBuffer()
+  const bytes = new Uint8Array(buf)
+  let binary = ''
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]!)
+  }
+  return btoa(binary)
+}
+
+/**
+ * Decode base64 data and upload it to R2.
+ * Returns the object key for subsequent retrieval.
+ */
+export async function uploadBase64ToR2(
+  event: H3Event,
+  key: string,
+  base64Data: string,
+  contentType: string,
+  bindingName = 'BUCKET',
+): Promise<string> {
+  const binary = atob(base64Data)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return uploadToR2(event, key, bytes.buffer, contentType, bindingName)
 }

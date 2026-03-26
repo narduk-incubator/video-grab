@@ -4,6 +4,7 @@ node_modules
 .env
 .wrangler
 lint-results.txt
+coverage/
 playwright-report/
 test-results/
 .DS_Store

@@ -25,5 +25,7 @@ export default defineEventHandler(async (event) => {
     .all()
 
   log.debug('API keys listed', { count: keys.length, userId: user.id })
-  return keys.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  return keys.sort((a: { createdAt: string }, b: { createdAt: string }) =>
+    b.createdAt.localeCompare(a.createdAt),
+  )
 })

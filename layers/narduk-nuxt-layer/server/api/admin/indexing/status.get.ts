@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { RATE_LIMIT_POLICIES, enforceRateLimitPolicy } from '#layer/server/utils/rateLimit'
 
 const querySchema = z.object({
   url: z.string().url(),
@@ -20,7 +21,7 @@ const querySchema = z.object({
 export default defineEventHandler(async (event) => {
   const log = useLogger(event).child('Indexing')
   await requireAdmin(event)
-  await enforceRateLimit(event, 'google-indexing-status', 60, 60_000)
+  await enforceRateLimitPolicy(event, RATE_LIMIT_POLICIES.googleIndexingStatus)
 
   const query = await getValidatedQuery(event, querySchema.parse)
   const encodedUrl = encodeURIComponent(query.url)

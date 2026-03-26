@@ -2,11 +2,18 @@
 /**
  * KV Namespace Utilities — Cloudflare Workers KV helpers.
  *
- * Requires a KV namespace binding in wrangler.json:
+ * Requires a KV namespace binding in the app `wrangler.json`. For local
+ * `nuxt dev` with `nitro-cloudflare-dev`, add a binding with `preview_id` so
+ * Miniflare exposes `KV` (see template `apps/web/wrangler.json`). Replace
+ * placeholder IDs with real namespace IDs before production deploy.
  * ```json
  * {
  *   "kv_namespaces": [
- *     { "binding": "KV", "id": "YOUR_KV_NAMESPACE_ID" }
+ *     {
+ *       "binding": "KV",
+ *       "id": "…",
+ *       "preview_id": "…"
+ *     }
  *   ]
  * }
  * ```

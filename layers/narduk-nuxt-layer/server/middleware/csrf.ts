@@ -7,10 +7,21 @@
  * while allowing XHR/fetch calls from our own frontend (which always send
  * custom headers).
  *
+ * **SSR constraint:** This middleware runs on every request including
+ * server-side `$fetch` calls during SSR. Mutations (POST/PUT/PATCH/DELETE)
+ * should only happen in response to client-side user actions, never inside
+ * `useAsyncData`/`useFetch` server passes. The layer's `fetch.client.ts`
+ * plugin automatically injects the required header for all client-side
+ * requests, and `useAppFetch()`/`useCsrfFetch()` also inject it
+ * automatically. If you still see 403s, ensure you're using one of these
+ * wrappers instead of raw `$fetch` for mutations.
+ *
  * Skipped for:
  * - Non-mutating methods (GET, HEAD, OPTIONS)
  * - Webhook/external callback routes (`/api/webhooks/`, `/api/cron/`)
- * - Health check endpoints
+ * - Auth provider routes (`/api/_auth/`)
+ * - Nuxt Content internal queries (`/__nuxt_content/`)
+ * - API key bearer auth (`Authorization: Bearer nk_...`)
  */
 export default defineEventHandler((event) => {
   const method = event.method.toUpperCase()
@@ -26,7 +37,8 @@ export default defineEventHandler((event) => {
     path.startsWith('/api/cron/') ||
     path.startsWith('/api/callbacks/') ||
     path.startsWith('/api/_auth/') ||
-    path.startsWith('/__nuxt_content/')
+    path.startsWith('/__nuxt_content/') ||
+    path === '/api/owner-tag'
   ) {
     return
   }
@@ -42,7 +54,9 @@ export default defineEventHandler((event) => {
     log.warn('CSRF blocked', { method, path })
     throw createError({
       statusCode: 403,
-      message: 'Forbidden: missing required header',
+      message:
+        'Forbidden: missing X-Requested-With header (CSRF protection). ' +
+        "Use useCsrfFetch(), useAppFetch(), or add { headers: { 'X-Requested-With': 'XMLHttpRequest' } } manually.",
     })
   }
 })

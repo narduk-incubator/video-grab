@@ -24,5 +24,12 @@
       "database_name": "video-grab-db",
       "database_id": "5d019170-4e09-4fdf-8f29-bc40a880347c"
     }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "KV",
+      "id": "00000000000000000000000000000000",
+      "preview_id": "00000000000000000000000000000000"
+    }
   ]
 }

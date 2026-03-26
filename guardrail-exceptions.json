@@ -1,0 +1,12 @@
+[
+  {
+    "file": "layers/narduk-nuxt-layer/app/composables/useFormat.ts",
+    "line": 1,
+    "kind": "eslint-disable",
+    "rule": "narduk/require-use-prefix-for-composables",
+    "reason": "The file intentionally exports pure format helpers that are not reactive composables.",
+    "owner": "template",
+    "createdAt": "2026-03-23",
+    "expiresAt": "2026-06-30"
+  }
+]

@@ -1,23 +1,30 @@
-import { execSync } from 'node:child_process'
 import {
+  chmodSync,
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
+  readlinkSync,
   readdirSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
-import { dirname, join, relative } from 'node:path'
+import { basename, dirname, join, relative } from 'node:path'
+import { runCommand } from './command'
 import {
+  BOOTSTRAP_SYNC_FILES,
   FLEET_ROOT_SCRIPT_PATCHES,
   FLEET_WEB_SCRIPT_PATCHES,
   GENERATED_SYNC_FILES,
+  REFERENCE_BASELINE_FILES,
   RECURSIVE_SYNC_DIRECTORIES,
   STALE_SYNC_PATHS,
   VERBATIM_SYNC_FILES,
   getCanonicalCiContent,
+  isIgnoredManagedPath,
 } from './sync-manifest'
 
 export interface RunAppSyncOptions {
@@ -27,6 +34,7 @@ export interface RunAppSyncOptions {
   dryRun?: boolean
   strict?: boolean
   skipQuality?: boolean
+  allowDirtyApp?: boolean
   allowDirtyTemplate?: boolean
   skipRewriteRepo?: boolean
   log?: (message: string) => void
@@ -38,22 +46,45 @@ interface SyncCounters {
   removed: number
 }
 
-const DIRECTORY_IGNORE_PATTERN =
-  /(^|\/)(node_modules|dist|\.turbo|\.nuxt|\.output|\.nitro|\.wrangler|\.data)(\/|$)/
-
 function createCounters(): SyncCounters {
   return { copied: 0, skipped: 0, removed: 0 }
 }
 
-function run(command: string, cwd: string) {
-  execSync(command, { cwd, stdio: 'inherit' })
+function run(command: string, args: string[], cwd: string) {
+  runCommand(command, args, {
+    cwd,
+    stdio: 'inherit',
+  })
 }
 
-function getOutput(command: string, cwd: string): string {
+function getOutput(command: string, args: string[], cwd: string): string {
   try {
-    return execSync(command, { cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim()
+    return runCommand(command, args, {
+      cwd,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim()
   } catch {
     return ''
+  }
+}
+
+function getTrackedTemplatePaths(templateDir: string): Set<string> | null {
+  try {
+    const output = runCommand('git', ['ls-files', '-z'], {
+      cwd: templateDir,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+
+    return new Set(
+      output
+        .split('\0')
+        .map((entry) => entry.trim())
+        .filter(Boolean),
+    )
+  } catch {
+    return null
   }
 }
 
@@ -61,9 +92,36 @@ function ensureDir(filePath: string) {
   mkdirSync(dirname(filePath), { recursive: true })
 }
 
+function pathOccupied(filePath: string): boolean {
+  try {
+    lstatSync(filePath)
+    return true
+  } catch {
+    return false
+  }
+}
+
 function filesIdentical(left: string, right: string): boolean {
   try {
     return readFileSync(left).equals(readFileSync(right))
+  } catch {
+    return false
+  }
+}
+
+function symlinkTargetsMatch(left: string, right: string): boolean {
+  try {
+    return lstatSync(left).isSymbolicLink() && lstatSync(right).isSymbolicLink()
+      ? readlinkSync(left, 'utf8') === readlinkSync(right, 'utf8')
+      : false
+  } catch {
+    return false
+  }
+}
+
+function fileModesMatch(sourcePath: string, targetPath: string): boolean {
+  try {
+    return statSync(sourcePath).mode === statSync(targetPath).mode
   } catch {
     return false
   }
@@ -76,23 +134,82 @@ function syncFile(
   counters: SyncCounters,
   dryRun: boolean,
   log: (message: string) => void,
+  label = relative(templateDir, sourcePath),
 ) {
   if (!existsSync(sourcePath)) return
 
-  if (existsSync(targetPath) && filesIdentical(sourcePath, targetPath)) {
+  const srcLstat = lstatSync(sourcePath)
+  if (srcLstat.isSymbolicLink()) {
+    const wantTarget = readlinkSync(sourcePath, 'utf8')
+    const occupied = pathOccupied(targetPath)
+
+    if (occupied && symlinkTargetsMatch(sourcePath, targetPath)) {
+      counters.skipped += 1
+      return
+    }
+
+    const action = occupied ? 'UPDATE' : 'ADD'
+    log(`  ${action}: ${label}`)
+
+    if (!dryRun) {
+      ensureDir(targetPath)
+      if (occupied) {
+        rmSync(targetPath, { recursive: true, force: true })
+      }
+      symlinkSync(wantTarget, targetPath)
+    }
+
+    counters.copied += 1
+    return
+  }
+
+  if (
+    existsSync(targetPath) &&
+    filesIdentical(sourcePath, targetPath) &&
+    fileModesMatch(sourcePath, targetPath)
+  ) {
     counters.skipped += 1
     return
   }
 
   const action = existsSync(targetPath) ? 'UPDATE' : 'ADD'
-  log(`  ${action}: ${relative(templateDir, sourcePath)}`)
+  log(`  ${action}: ${label}`)
 
   if (!dryRun) {
     ensureDir(targetPath)
     copyFileSync(sourcePath, targetPath)
+    chmodSync(targetPath, srcLstat.mode)
   }
 
   counters.copied += 1
+}
+
+function collectTrackedPathsForDirectory(relativeDir: string, trackedPaths: Set<string>): string[] {
+  const prefix = `${relativeDir}/`
+
+  return [...trackedPaths].filter((path) => path.startsWith(prefix)).sort()
+}
+
+function syncTrackedDirectory(
+  relativeDir: string,
+  templateDir: string,
+  appDir: string,
+  trackedPaths: Set<string>,
+  counters: SyncCounters,
+  dryRun: boolean,
+  log: (message: string) => void,
+) {
+  for (const relativePath of collectTrackedPathsForDirectory(relativeDir, trackedPaths)) {
+    syncFile(
+      join(templateDir, relativePath),
+      join(appDir, relativePath),
+      templateDir,
+      counters,
+      dryRun,
+      log,
+      relativePath,
+    )
+  }
 }
 
 function syncDirectoryRecursive(
@@ -103,9 +220,34 @@ function syncDirectoryRecursive(
   dryRun: boolean,
   log: (message: string) => void,
 ) {
-  if (!existsSync(sourceRoot) || DIRECTORY_IGNORE_PATTERN.test(sourceRoot)) return
+  if (!existsSync(sourceRoot) || isIgnoredManagedPath(sourceRoot)) return
 
-  const stat = statSync(sourceRoot)
+  const stat = lstatSync(sourceRoot)
+
+  if (stat.isSymbolicLink()) {
+    const wantTarget = readlinkSync(sourceRoot, 'utf8')
+    const occupied = pathOccupied(targetRoot)
+
+    if (occupied && symlinkTargetsMatch(sourceRoot, targetRoot)) {
+      counters.skipped += 1
+      return
+    }
+
+    const action = occupied ? 'UPDATE' : 'ADD'
+    log(`  ${action}: ${relative(templateDir, sourceRoot)}`)
+
+    if (!dryRun) {
+      ensureDir(targetRoot)
+      if (occupied) {
+        rmSync(targetRoot, { recursive: true, force: true })
+      }
+      symlinkSync(wantTarget, targetRoot)
+    }
+
+    counters.copied += 1
+    return
+  }
+
   if (stat.isDirectory()) {
     if (!existsSync(targetRoot) && !dryRun) {
       mkdirSync(targetRoot, { recursive: true })
@@ -172,11 +314,27 @@ function ensureTemplateState(
 ) {
   if (dryRun || allowDirtyTemplate) return
 
-  const status = getOutput('git status --porcelain', templateDir)
+  const status = getOutput('git', ['status', '--porcelain'], templateDir)
   if (status) {
     log('❌ Template repository has uncommitted changes.')
     log('   Commit or stash changes before syncing the fleet.')
     throw new Error('template repository is dirty')
+  }
+}
+
+function ensureAppState(
+  appDir: string,
+  allowDirtyApp: boolean,
+  dryRun: boolean,
+  log: (message: string) => void,
+) {
+  if (dryRun || allowDirtyApp) return
+
+  const status = getOutput('git', ['status', '--porcelain'], appDir)
+  if (status) {
+    log('❌ App repository has uncommitted changes.')
+    log('   Commit or stash changes before syncing, or re-run with --allow-dirty-app.')
+    throw new Error('app repository is dirty')
   }
 }
 
@@ -188,10 +346,23 @@ function syncManagedFiles(
   mode: 'full' | 'layer',
   log: (message: string) => void,
 ) {
+  const trackedPaths = getTrackedTemplatePaths(templateDir)
+
   if (mode === 'full') {
     log('Phase 1: Syncing managed template files...')
     for (const file of VERBATIM_SYNC_FILES) {
+      if (trackedPaths && !trackedPaths.has(file)) continue
       syncFile(join(templateDir, file), join(appDir, file), templateDir, counters, dryRun, log)
+    }
+    for (const file of REFERENCE_BASELINE_FILES) {
+      if (trackedPaths && !trackedPaths.has(file)) continue
+      syncFile(join(templateDir, file), join(appDir, file), templateDir, counters, dryRun, log)
+    }
+    for (const file of BOOTSTRAP_SYNC_FILES) {
+      if (trackedPaths && !trackedPaths.has(file)) continue
+      const targetPath = join(appDir, file)
+      if (existsSync(targetPath)) continue
+      syncFile(join(templateDir, file), targetPath, templateDir, counters, dryRun, log)
     }
   } else {
     log('Phase 1: Syncing vendored layer...')
@@ -200,6 +371,11 @@ function syncManagedFiles(
   const directories =
     mode === 'full' ? RECURSIVE_SYNC_DIRECTORIES : (['layers/narduk-nuxt-layer'] as const)
   for (const directory of directories) {
+    if (trackedPaths) {
+      syncTrackedDirectory(directory, templateDir, appDir, trackedPaths, counters, dryRun, log)
+      continue
+    }
+
     syncDirectoryRecursive(
       join(templateDir, directory),
       join(appDir, directory),
@@ -277,9 +453,11 @@ function patchRootPackage(
     devDependencies?: Record<string, string>
     pnpm?: {
       overrides?: Record<string, string>
+      peerDependencyRules?: Record<string, unknown>
       onlyBuiltDependencies?: string[]
     }
   }
+  const expectedPackageName = basename(appDir)
 
   let touched = false
   patchJsonFile<Record<string, any>>(
@@ -288,7 +466,47 @@ function patchRootPackage(
       let changed = false
 
       if (mode === 'full') {
+        if (pkg.name !== expectedPackageName) {
+          pkg.name = expectedPackageName
+          changed = true
+        }
+
         pkg.scripts = pkg.scripts || {}
+        for (const scriptName of [
+          'dev:workspace',
+          'dev:showcase',
+          'dev:showcase:no-doppler',
+          'dev:e2e',
+          'db:ready:all',
+          'build:showcase',
+          'deploy:showcase',
+          'test:e2e:showcase',
+          'test:e2e:mapkit',
+          'quality:fleet',
+          'sync:fleet',
+          'sync:fleet:fast',
+          'sync:fleet:dry',
+          'status:fleet',
+          'ship:fleet',
+          'migrate-to-org',
+          'check:reach',
+          'check:fleet-doppler',
+          'validate:fleet',
+          'backfill:packages-read',
+          'tail:fleet',
+          'fetch:fleet',
+          'audit:fleet-themes',
+          'audit:fleet-guardrails',
+          'backfill:secrets',
+          'predeploy',
+          'tail',
+        ]) {
+          if (scriptName in pkg.scripts) {
+            delete pkg.scripts[scriptName]
+            changed = true
+          }
+        }
+
         for (const [name, command] of Object.entries(FLEET_ROOT_SCRIPT_PATCHES)) {
           if (pkg.scripts[name] !== command) {
             pkg.scripts[name] = command
@@ -311,10 +529,18 @@ function patchRootPackage(
 
       pkg.pnpm = pkg.pnpm || {}
       const templateOverrides = templatePackage.pnpm?.overrides || {}
+      const templatePeerDependencyRules = templatePackage.pnpm?.peerDependencyRules || {}
       const templateOnlyBuiltDependencies = templatePackage.pnpm?.onlyBuiltDependencies || []
 
       if (JSON.stringify(pkg.pnpm.overrides) !== JSON.stringify(templateOverrides)) {
         pkg.pnpm.overrides = templateOverrides
+        changed = true
+      }
+
+      if (
+        JSON.stringify(pkg.pnpm.peerDependencyRules) !== JSON.stringify(templatePeerDependencyRules)
+      ) {
+        pkg.pnpm.peerDependencyRules = templatePeerDependencyRules
         changed = true
       }
 
@@ -339,10 +565,53 @@ function patchRootPackage(
   return touched
 }
 
+/**
+ * `apps/web/wrangler.json` is not copied verbatim (would wipe D1 ids, routes,
+ * domains). When the layer expects Workers KV, merge a missing `KV` binding
+ * from the template so `nitro-cloudflare-dev` matches new layer routes.
+ */
+function mergeWebWranglerKvBinding(
+  appDir: string,
+  templateDir: string,
+  dryRun: boolean,
+  mode: 'full' | 'layer',
+  log: (message: string) => void,
+): void {
+  if (mode !== 'full') return
+
+  const templatePath = join(templateDir, 'apps/web/wrangler.json')
+  const appPath = join(appDir, 'apps/web/wrangler.json')
+  if (!existsSync(templatePath) || !existsSync(appPath)) return
+
+  const templateWrangler = JSON.parse(readFileSync(templatePath, 'utf-8')) as {
+    kv_namespaces?: Array<{ binding?: string; id?: string; preview_id?: string }>
+  }
+  const templateKv = templateWrangler.kv_namespaces?.find((n) => n?.binding === 'KV')
+  if (!templateKv) return
+
+  const changed = patchJsonFile<Record<string, unknown>>(
+    appPath,
+    (w) => {
+      const list = (w.kv_namespaces as Array<{ binding?: string }> | undefined) ?? []
+      if (list.some((n) => n?.binding === 'KV')) {
+        return false
+      }
+      w.kv_namespaces = [...list, JSON.parse(JSON.stringify(templateKv)) as Record<string, unknown>]
+      return true
+    },
+    dryRun,
+  )
+
+  if (changed) {
+    log('  UPDATE: apps/web/wrangler.json (merged KV binding from template)')
+  }
+}
+
 function patchWebPackage(
   appDir: string,
   templateDir: string,
   dryRun: boolean,
+  mode: 'full' | 'layer',
   log: (message: string) => void,
 ): boolean {
   const webPackagePath = join(appDir, 'apps/web/package.json')
@@ -352,6 +621,7 @@ function patchWebPackage(
     readFileSync(join(templateDir, 'apps/web/package.json'), 'utf-8'),
   ) as {
     dependencies?: Record<string, string>
+    devDependencies?: Record<string, string>
   }
 
   let touched = false
@@ -361,10 +631,16 @@ function patchWebPackage(
       let changed = false
 
       pkg.scripts = pkg.scripts || {}
-      for (const [name, command] of Object.entries(FLEET_WEB_SCRIPT_PATCHES)) {
-        if (pkg.scripts[name] !== command) {
-          pkg.scripts[name] = command
+      if (mode === 'full') {
+        if (pkg.name !== 'web') {
+          pkg.name = 'web'
           changed = true
+        }
+        for (const [name, command] of Object.entries(FLEET_WEB_SCRIPT_PATCHES)) {
+          if (pkg.scripts[name] !== command) {
+            pkg.scripts[name] = command
+            changed = true
+          }
         }
       }
 
@@ -375,12 +651,24 @@ function patchWebPackage(
         }
         const databaseName = wrangler.d1_databases?.[0]?.database_name
         if (databaseName) {
-          const expectedMigrate = `bash ../../tools/db-migrate.sh ${databaseName} --local --dir drizzle`
-          const expectedReset = `bash ../../tools/db-migrate.sh ${databaseName} --local --dir drizzle --reset && pnpm run db:seed`
+          const layerDrizzleDir =
+            'node_modules/@narduk-enterprises/narduk-nuxt-template-layer/drizzle'
+          const expectedMigrate = `bash ../../tools/db-migrate.sh ${databaseName} --local --dir ${layerDrizzleDir} --dir drizzle`
+          const expectedSeed = `wrangler d1 execute ${databaseName} --local --file=node_modules/@narduk-enterprises/narduk-nuxt-template-layer/drizzle/seed.sql`
+          const expectedReset = `bash ../../tools/db-migrate.sh ${databaseName} --local --dir ${layerDrizzleDir} --dir drizzle --reset && pnpm run db:seed`
           const expectedReady = 'pnpm run db:migrate && pnpm run db:seed'
+          const expectedVerify =
+            'node node_modules/@narduk-enterprises/narduk-nuxt-template-layer/testing/verify-local-db.mjs .'
+          const expectedPredev = 'pnpm run db:ready'
+          const expectedDev = '(doppler run -- nuxt dev || nuxt dev)'
 
           if (pkg.scripts['db:migrate'] !== expectedMigrate) {
             pkg.scripts['db:migrate'] = expectedMigrate
+            changed = true
+          }
+
+          if (pkg.scripts['db:seed'] !== expectedSeed) {
+            pkg.scripts['db:seed'] = expectedSeed
             changed = true
           }
 
@@ -393,22 +681,53 @@ function patchWebPackage(
             pkg.scripts['db:ready'] = expectedReady
             changed = true
           }
+
+          if (pkg.scripts['db:verify'] !== expectedVerify) {
+            pkg.scripts['db:verify'] = expectedVerify
+            changed = true
+          }
+
+          if (pkg.scripts['predev'] !== expectedPredev) {
+            pkg.scripts['predev'] = expectedPredev
+            changed = true
+          }
+
+          if (pkg.scripts['dev'] !== expectedDev) {
+            pkg.scripts['dev'] = expectedDev
+            changed = true
+          }
         }
       }
 
-      pkg.dependencies = pkg.dependencies || {}
-      const templateEslintVersion =
-        templateWebPackage.dependencies?.['@narduk-enterprises/eslint-config']
-      if (pkg.dependencies['@narduk/eslint-config']) {
-        delete pkg.dependencies['@narduk/eslint-config']
-        changed = true
-      }
-      if (
-        templateEslintVersion &&
-        pkg.dependencies['@narduk-enterprises/eslint-config'] !== templateEslintVersion
-      ) {
-        pkg.dependencies['@narduk-enterprises/eslint-config'] = templateEslintVersion
-        changed = true
+      if (mode === 'full') {
+        pkg.dependencies = pkg.dependencies || {}
+        pkg.devDependencies = pkg.devDependencies || {}
+        const eslintPkgPath = join(templateDir, 'packages/eslint-config/package.json')
+        const templateEslintVersion =
+          templateWebPackage.dependencies?.['@narduk-enterprises/eslint-config'] ??
+          (existsSync(eslintPkgPath)
+            ? (
+                JSON.parse(readFileSync(eslintPkgPath, 'utf-8')) as {
+                  dependencies?: Record<string, string>
+                }
+              ).dependencies?.['@narduk-enterprises/eslint-config']
+            : undefined)
+        const templateDevEslintVersion = templateWebPackage.devDependencies?.eslint
+        if (pkg.dependencies['@narduk/eslint-config']) {
+          delete pkg.dependencies['@narduk/eslint-config']
+          changed = true
+        }
+        if (
+          templateEslintVersion &&
+          pkg.dependencies['@narduk-enterprises/eslint-config'] !== templateEslintVersion
+        ) {
+          pkg.dependencies['@narduk-enterprises/eslint-config'] = templateEslintVersion
+          changed = true
+        }
+        if (templateDevEslintVersion && pkg.devDependencies.eslint !== templateDevEslintVersion) {
+          pkg.devDependencies.eslint = templateDevEslintVersion
+          changed = true
+        }
       }
 
       touched ||= changed
@@ -430,6 +749,7 @@ function patchGitignore(appDir: string, dryRun: boolean, log: (message: string) 
 
   let content = readFileSync(gitignorePath, 'utf-8')
   const original = content
+  const requiredEntries = ['.env', '.env.*', '.dev.vars', 'doppler.yaml', 'doppler.json']
 
   if (!content.includes('.turbo')) {
     content = content.replace(/\.cache\n/, '.cache\n.turbo\n')
@@ -437,6 +757,15 @@ function patchGitignore(appDir: string, dryRun: boolean, log: (message: string) 
 
   if (content.includes('tools/eslint-plugin-vue-official-best-practices')) {
     content = content.replace(/.*tools\/eslint-plugin-vue-official-best-practices.*\n?/g, '')
+  }
+
+  for (const entry of requiredEntries) {
+    if (!content.includes(entry)) {
+      if (!content.endsWith('\n')) {
+        content += '\n'
+      }
+      content += `${entry}\n`
+    }
   }
 
   if (content === original) return false
@@ -448,14 +777,30 @@ function patchGitignore(appDir: string, dryRun: boolean, log: (message: string) 
   return true
 }
 
+function ensureGitHooksPath(
+  appDir: string,
+  dryRun: boolean,
+  log: (message: string) => void,
+): boolean {
+  if (!existsSync(join(appDir, '.githooks'))) return false
+
+  const current = getOutput('git', ['config', '--get', 'core.hooksPath'], appDir)
+  const normalized = current.replace(/\/+$/, '').replace(/^\.\//, '')
+  if (normalized === '.githooks') return false
+
+  log('  UPDATE: git core.hooksPath -> .githooks')
+  if (!dryRun) {
+    runCommand('git', ['config', 'core.hooksPath', '.githooks'], {
+      cwd: appDir,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+  }
+  return true
+}
+
 function patchNpmrc(appDir: string, dryRun: boolean, log: (message: string) => void): boolean {
   const npmrcPath = join(appDir, '.npmrc')
-  const defaultContent = [
-    '@narduk-enterprises:registry=https://npm.pkg.github.com',
-    '',
-    'strict-peer-dependencies=false',
-    '',
-  ].join('\n')
+  const defaultContent = ['@narduk-enterprises:registry=https://npm.pkg.github.com', ''].join('\n')
 
   if (!existsSync(npmrcPath)) {
     log('  ADD: .npmrc')
@@ -479,16 +824,22 @@ function patchNpmrc(appDir: string, dryRun: boolean, log: (message: string) => v
     content = content.replace(/@loganrenz:registry/g, '@narduk-enterprises:registry')
   }
 
-  if (content.includes('strict-peer-dependencies=true')) {
-    content = content.replace('strict-peer-dependencies=true', 'strict-peer-dependencies=false')
-  }
+  const sanitizedLines = content
+    .split('\n')
+    .filter((line) => !line.includes('//npm.pkg.github.com/:_authToken='))
+    .filter((line) => !line.includes('Auth token injected via CI env'))
+  content = sanitizedLines.join('\n')
 
-  if (!content.includes('strict-peer-dependencies=false')) {
-    if (!content.endsWith('\n')) {
-      content += '\n'
-    }
-    content += 'strict-peer-dependencies=false\n'
-  }
+  content = `${content
+    .split('\n')
+    .reduce<string[]>((lines, line) => {
+      const previous = lines[lines.length - 1]
+      if (line === '' && previous === '') return lines
+      lines.push(line)
+      return lines
+    }, [])
+    .join('\n')
+    .trimEnd()}\n`
 
   if (content === original) return false
 
@@ -499,42 +850,20 @@ function patchNpmrc(appDir: string, dryRun: boolean, log: (message: string) => v
   return true
 }
 
-function ensureSetupComplete(
-  appDir: string,
-  dryRun: boolean,
-  log: (message: string) => void,
-): boolean {
-  const sentinelPath = join(appDir, '.setup-complete')
-  if (existsSync(sentinelPath)) return false
-
-  log('  ADD: .setup-complete')
-  if (!dryRun) {
-    writeFileSync(
-      sentinelPath,
-      `initialized=${new Date().toISOString()}\napp=${relative(dirname(appDir), appDir)}\nsource=sync-template\n`,
-      'utf-8',
-    )
+function warnIfBootstrapArtifactsMissing(appDir: string, log: (message: string) => void): void {
+  const missing: string[] = []
+  if (!existsSync(join(appDir, '.setup-complete'))) {
+    missing.push('.setup-complete')
   }
-  return true
-}
-
-function ensureDopplerYaml(
-  appDir: string,
-  dryRun: boolean,
-  log: (message: string) => void,
-): boolean {
-  const dopplerPath = join(appDir, 'doppler.yaml')
-  const repoName = appDir.split('/').pop() || 'unknown'
-  const expectedContent = `setup:\n  project: ${repoName}\n  config: prd\n`
-  const currentContent = existsSync(dopplerPath) ? readFileSync(dopplerPath, 'utf-8') : null
-
-  if (currentContent === expectedContent) return false
-
-  log(`  ${currentContent === null ? 'ADD' : 'UPDATE'}: doppler.yaml`)
-  if (!dryRun) {
-    writeFileSync(dopplerPath, expectedContent, 'utf-8')
+  if (!existsSync(join(appDir, 'doppler.yaml'))) {
+    missing.push('doppler.yaml')
   }
-  return true
+  if (missing.length === 0) return
+
+  log(`  WARN: bootstrap-managed files missing (${missing.join(', ')})`)
+  log(
+    '        Sync will not recreate provisioning artifacts; repair them via provisioning or an explicit ops flow.',
+  )
 }
 
 function rewriteLayerRepository(
@@ -545,7 +874,7 @@ function rewriteLayerRepository(
   const layerPackagePath = join(appDir, 'layers/narduk-nuxt-layer/package.json')
   if (!existsSync(layerPackagePath)) return false
 
-  const originUrl = getOutput('git remote get-url origin', appDir)
+  const originUrl = getOutput('git', ['remote', 'get-url', 'origin'], appDir)
   if (!originUrl) return false
 
   let touched = false
@@ -619,7 +948,7 @@ function runInstallAndQuality(
 
   log('')
   log('Phase 5: Installing dependencies...')
-  run('pnpm install --no-frozen-lockfile', appDir)
+  run('pnpm', ['install', '--no-frozen-lockfile'], appDir)
 
   if (skipQuality) {
     log('')
@@ -629,7 +958,7 @@ function runInstallAndQuality(
 
   log('')
   log('Phase 6: Running quality gate...')
-  run('pnpm run quality', appDir)
+  run('pnpm', ['run', 'quality:check'], appDir)
 }
 
 export async function runAppSync(options: RunAppSyncOptions) {
@@ -637,13 +966,16 @@ export async function runAppSync(options: RunAppSyncOptions) {
   const dryRun = options.dryRun ?? false
   const skipQuality = options.skipQuality ?? false
   const strict = options.strict ?? false
+  const allowDirtyApp = options.allowDirtyApp ?? false
   const allowDirtyTemplate = options.allowDirtyTemplate ?? false
   const skipRewriteRepo = options.skipRewriteRepo ?? false
   const log = options.log ?? console.log
   const counters = createCounters()
 
   ensureTemplateState(options.templateDir, allowDirtyTemplate, dryRun, log)
-  const templateSha = getOutput('git rev-parse HEAD', options.templateDir)
+
+  ensureAppState(options.appDir, allowDirtyApp, dryRun, log)
+  const templateSha = getOutput('git', ['rev-parse', 'HEAD'], options.templateDir)
 
   log('')
   log(
@@ -667,15 +999,19 @@ export async function runAppSync(options: RunAppSyncOptions) {
   )
 
   const packageTouched = patchRootPackage(options.appDir, options.templateDir, dryRun, mode, log)
+  patchWebPackage(options.appDir, options.templateDir, dryRun, mode, log)
+  mergeWebWranglerKvBinding(options.appDir, options.templateDir, dryRun, mode, log)
   if (mode === 'full') {
-    patchWebPackage(options.appDir, options.templateDir, dryRun, log)
     patchGitignore(options.appDir, dryRun, log)
     patchNpmrc(options.appDir, dryRun, log)
-    ensureSetupComplete(options.appDir, dryRun, log)
-    ensureDopplerYaml(options.appDir, dryRun, log)
-    if (templateSha) {
-      writeTemplateVersion(options.appDir, templateSha, dryRun, log)
-    }
+    warnIfBootstrapArtifactsMissing(options.appDir, log)
+    ensureGitHooksPath(options.appDir, dryRun, log)
+  }
+
+  // Record template HEAD for drift checks and fleet audit — must run for layer-only
+  // sync too, otherwise check-drift-ci keeps comparing against a stale SHA.
+  if (templateSha) {
+    writeTemplateVersion(options.appDir, templateSha, dryRun, log)
   }
 
   if (!skipRewriteRepo) {
@@ -691,7 +1027,7 @@ export async function runAppSync(options: RunAppSyncOptions) {
   if (!dryRun && strict && mode === 'full') {
     log('')
     log('Phase 7: Verifying drift state...')
-    run('npx tsx tools/check-drift-ci.ts --strict', options.appDir)
+    run('pnpm', ['exec', 'tsx', 'tools/check-drift-ci.ts', '--strict'], options.appDir)
   }
 
   log('')

@@ -77,7 +77,7 @@ withDefaults(
       :style="{
         fontSize: '56px',
         fontWeight: '700',
-        // eslint-disable-next-line narduk/no-inline-hex
+        // eslint-disable-next-line narduk/no-inline-hex -- Takumi OG image props need raw hex values; Tailwind utilities are unavailable in this render context
         color: '#f1f5f9',
         lineHeight: '1.15',
         marginBottom: '16px',
@@ -92,7 +92,7 @@ withDefaults(
       :style="{
         fontSize: '24px',
         fontWeight: '400',
-        // eslint-disable-next-line narduk/no-inline-hex
+        // eslint-disable-next-line narduk/no-inline-hex -- Takumi OG image props need raw hex values; Tailwind utilities are unavailable in this render context
         color: '#94a3b8',
         lineHeight: '1.5',
         maxWidth: '800px',
@@ -131,7 +131,7 @@ withDefaults(
         :style="{
           fontSize: '18px',
           fontWeight: '600',
-          // eslint-disable-next-line narduk/no-inline-hex
+          // eslint-disable-next-line narduk/no-inline-hex -- Takumi OG image props need raw hex values; Tailwind utilities are unavailable in this render context
           color: '#64748b',
         }"
       >

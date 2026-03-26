@@ -74,7 +74,9 @@ describe('CSRF middleware', () => {
 
   it('blocks POST without X-Requested-With', () => {
     const event = createMockEvent('POST', '/api/users')
-    expect(() => handler(event as never)).toThrow('Forbidden: missing required header')
+    expect(() => handler(event as never)).toThrow(
+      'Forbidden: missing X-Requested-With header (CSRF protection)',
+    )
   })
 
   it('allows POST with X-Requested-With', () => {

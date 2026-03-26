@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+
+# Repo-local skill syncing is intentionally unmanaged.
+exit 0

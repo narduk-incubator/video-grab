@@ -35,14 +35,47 @@ export default defineNuxtPlugin(() => {
     ;(window as any).$nuxt = {}
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Legacy integration global injection
-  ;(window as any).$nuxt.$posthog = posthog
+  ;(window as any).$nuxt.$posthog = posthogClient
 
-  // Tag internal traffic and uniquely identify the fleet application
+  // ---------------------------------------------------------------------------
+  // Super properties — registered on every event for easy filtering.
+  //
+  // PostHog dashboard setup:
+  //   Project Settings → "Filter out internal and test users" →
+  //     • is_owner — is set        (owner traffic)
+  //     • is_internal_user — is set (preview deploy traffic)
+  //     • environment — does not equal "production"  (optional)
+  //
+  // To tag yourself as owner, POST /api/owner-tag with OWNER_TAG_SECRET.
+  // ---------------------------------------------------------------------------
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Dynamic property bag
   const superProperties: Record<string, any> = { app: appName }
+
+  // Tag preview/staging deploys (.pages.dev URLs)
   if (window.location.hostname.endsWith('.pages.dev')) {
     superProperties.is_internal_user = true
   }
+
+  // Tag owner traffic (cookie set via /api/owner-tag)
+  const isOwner = document.cookie.includes('narduk_owner=true')
+  superProperties.is_owner = isOwner
+
+  // Correlate traffic with deploy versions
+  const appVersion = runtimeConfig.public.appVersion
+  if (appVersion) {
+    superProperties.app_version = appVersion
+  }
+
+  // Environment heuristic: preview (.pages.dev) / development (localhost) / production
+  const hostname = window.location.hostname
+  if (hostname === 'localhost' || hostname === '127.0.0.1') {
+    superProperties.environment = 'development'
+  } else if (hostname.endsWith('.pages.dev')) {
+    superProperties.environment = 'preview'
+  } else {
+    superProperties.environment = 'production'
+  }
+
   posthog.register(superProperties)
 
   // Capture initial pageview since Nuxt router.afterEach does not fire on SSR hydration

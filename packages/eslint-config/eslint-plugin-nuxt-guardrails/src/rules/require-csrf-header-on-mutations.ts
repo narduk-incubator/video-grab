@@ -9,8 +9,10 @@
  * source code that passes explicit headers may clobber the injected ones, and
  * some patterns (e.g. $fetch.create) bypass injection entirely.
  *
- * The safest pattern is to always include `'X-Requested-With': 'XMLHttpRequest'`
- * in the headers object, or use `useNuxtApp().$csrfFetch`.
+ * Preferred fixes (in order):
+ * 1. Use `useCsrfFetch()` — auto-injects the header on mutations.
+ * 2. Use `useAppFetch()` — same, plus SSR cookie forwarding for stores.
+ * 3. Manually include `'X-Requested-With': 'XMLHttpRequest'` in headers.
  */
 
 import type { Rule } from 'eslint'
@@ -60,7 +62,7 @@ export default {
     type: 'problem' as const,
     docs: {
       description:
-        'mutation $fetch calls in composables must include X-Requested-With header for CSRF protection',
+        'mutation $fetch calls in composables must use useCsrfFetch()/useAppFetch() or include X-Requested-With header',
       category: 'Security',
       recommended: true,
     },
@@ -75,7 +77,8 @@ export default {
     ],
     messages: {
       missingCsrf:
-        "Mutation $fetch calls in composables must include { headers: { 'X-Requested-With': 'XMLHttpRequest' } } for CSRF protection, or use useNuxtApp().$csrfFetch.",
+        'Mutation $fetch calls must include CSRF protection. Prefer useCsrfFetch() or useAppFetch() (auto-injects header). ' +
+        "Alternatively, add { headers: { 'X-Requested-With': 'XMLHttpRequest' } } manually.",
     },
   },
   create(context: Rule.RuleContext): Rule.RuleListener {

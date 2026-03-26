@@ -16,8 +16,9 @@ template.
      content sites
    - **SQL database** (Cloudflare D1 via Drizzle ORM) — great for CRUD apps,
      dashboards, user-generated content
-   - **Rich UI components** (Nuxt UI 4 with Pro components — Dashboard, Page,
-     Pricing, Blog, Auth, Chat, Editor)
+   - **Rich UI components** (Nuxt UI 4 including the page-building primitives
+     formerly branded as Pro — Dashboard, Page, Pricing, Blog, Auth, Chat,
+     Editor)
    - **Monorepo architecture** (apps + shared packages)
    - **Edge-first** — sub-50ms responses globally, ideal for tools people Google
      for
@@ -92,8 +93,10 @@ the control plane:
    ```
 
    This creates the GitHub repo, registers it in the fleet, and triggers the
-   `provision-app.yml` GitHub Action which runs init.ts, analytics setup, and
-   first deploy automatically.
+   control plane’s `provision-app.yml` workflow (`tools/provision/*`, hydrate,
+   analytics, first deploy). The hydrate step must set **`apps/web/wrangler.json`**
+   **`kv_namespaces`** for binding **`KV`** (`id` + **`preview_id`**, not template
+   placeholders); see `docs/agents/operations.md` (control plane KV section).
 
 2. Poll for completion:
 
@@ -284,9 +287,9 @@ Build the app inside `apps/web`. Features:
 
 - [UI requirements...]
 - **Requirement:** Use the inherited layer design tokens, Nuxt UI 4 components
-  (including Pro components: `PageHero`, `PageSection`, `PageFeature`, `PageCTA`
-  for landing pages; `DashboardGroup`, `DashboardSidebar`, `DashboardPanel` for
-  admin interfaces), and Tailwind v4.
+  (including page-building components such as `PageHero`, `PageSection`,
+  `PageFeature`, `PageCTA` for landing pages and `DashboardGroup`,
+  `DashboardSidebar`, `DashboardPanel` for admin interfaces), and Tailwind v4.
 
 ### ⚠️ CRITICAL: Database Schema Extension Pattern
 

@@ -8,40 +8,41 @@
     "dev": "pnpm --filter web dev",
     "prebuild": "node tools/check-setup.cjs",
     "build": "doppler run -- pnpm -r build",
-    "preship": "node tools/check-setup.cjs && pnpm install --frozen-lockfile && npx tsx tools/check-drift-ci.ts && npx tsx tools/check-sync-health.ts && pnpm run quality",
-    "ship": "npx tsx tools/ship.ts",
-    "postinstall": "node -e \"if(!require('fs').existsSync('.setup-complete'))console.log('\\n⚠️  Run pnpm run setup before doing anything else! See AGENTS.md.\\n')\"",
+    "preship": "node tools/check-setup.cjs && pnpm install --frozen-lockfile && pnpm audit --audit-level=critical && pnpm exec tsx tools/check-drift-ci.ts && pnpm exec tsx tools/check-sync-health.ts && pnpm run quality:check",
+    "ship": "pnpm exec tsx tools/ship.ts",
+    "postinstall": "node -e \"if(!require('fs').existsSync('.setup-complete'))console.log('\\n⚠️  New apps: provision via the control plane (see AGENTS.md). Generated starters get .setup-complete from provisioning.\\n')\"",
     "build:plugins": "pnpm --filter @narduk/eslint-config build",
     "prelint": "pnpm run build:plugins",
     "lint": "pnpm run prelint && turbo run lint",
     "typecheck": "turbo run typecheck",
-    "quality": "turbo run quality --filter='./apps/*'",
+    "quality": "pnpm run quality:fix && pnpm run quality:check",
     "setup": "npx tsx tools/init.ts",
-    "update-layer": "npx tsx tools/update-layer.ts",
-    "sync-template": "npx tsx tools/sync-template.ts .",
-    "migrate-to-org": "npx tsx tools/migrate-to-org.ts",
-    "validate": "doppler run -- npx tsx tools/validate.ts",
-    "check:reach": "npx tsx tools/check-apps-reachable.ts",
-    "check:fleet-doppler": "doppler run -- npx tsx tools/validate-fleet-doppler.ts",
+    "update-layer": "pnpm exec tsx tools/update-layer.ts",
+    "sync-template": "pnpm exec tsx tools/sync-template.ts .",
+    "validate": "pnpm exec tsx tools/validate.ts",
     "clean": "find . -type d \\( -name node_modules -o -name .nuxt -o -name .output -o -name .nitro -o -name .wrangler -o -name .turbo -o -name .data -o -name dist \\) -not -path './.git/*' -prune -exec rm -rf {} +",
-    "clean:install": "pnpm run clean && pnpm install && pnpm run db:ready:all",
+    "clean:install": "pnpm run clean && pnpm install && pnpm --filter web run db:ready",
     "db:migrate": "pnpm --filter web run db:migrate",
     "dev:kill": "sh scripts/dev-kill.sh",
     "test:e2e": "playwright test",
-    "generate:favicons": "npx tsx tools/generate-favicons.ts",
-    "predeploy": "node tools/check-setup.cjs",
-    "format": "prettier --write \"**/*.{ts,mts,vue,js,mjs,json,yaml,yml,css,md}\" --ignore-path .gitignore",
-    "format:check": "prettier --check \"**/*.{ts,mts,vue,js,mjs,json,yaml,yml,css,md}\" --ignore-path .gitignore",
-    "tail": "npx tsx tools/tail.ts",
-    "check:sync-health": "npx tsx tools/check-sync-health.ts",
-    "quality:fix": "turbo run lint --force -- --fix && pnpm run format"
+    "generate:favicons": "pnpm exec tsx tools/generate-favicons.ts",
+    "format": "prettier --write \"**/*.{ts,mts,vue,js,mjs,json,yaml,yml,css,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,mts,vue,js,mjs,json,yaml,yml,css,md}\"",
+    "check:sync-health": "pnpm exec tsx tools/check-sync-health.ts",
+    "quality:fix": "turbo run lint --force -- --fix && pnpm run format",
+    "hooks:install": "node tools/install-git-hooks.cjs",
+    "guardrails:repo": "pnpm exec tsx tools/check-guardrails.ts",
+    "cleanup:node-leaks": "sh scripts/cleanup-node-leaks.sh",
+    "test:e2e:web": "pnpm --filter web test:e2e",
+    "quality:check": "pnpm run guardrails:repo && turbo run quality --filter='./apps/*'",
+    "check": "pnpm run quality:check"
   },
   "pnpm": {
     "overrides": {
       "esbuild": ">=0.25.0",
       "serialize-javascript": ">=7.0.3",
       "@cloudflare/unenv-preset": "2.12.1",
-      "nuxt-og-image": "6.0.0-beta.47",
+      "nuxt-og-image": "6.1.2",
       "@takumi-rs/core": ">=0.70.1",
       "@takumi-rs/wasm": ">=0.70.1",
       "@cloudflare/workers-types": "4.20260307.1",
@@ -59,7 +60,14 @@
       "unrs-resolver",
       "vue-demi",
       "workerd"
-    ]
+    ],
+    "peerDependencyRules": {
+      "allowAny": [
+        "eslint",
+        "citty",
+        "@cloudflare/workers-types"
+      ]
+    }
   },
   "volta": {
     "node": "22.22.0"

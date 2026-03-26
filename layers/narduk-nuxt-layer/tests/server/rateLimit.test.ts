@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { enforceRateLimit } from '../../server/utils/rateLimit'
+import {
+  enforceRateLimit,
+  enforceRateLimitPolicy,
+  RATE_LIMIT_POLICIES,
+} from '../../server/utils/rateLimit'
 
 /**
  * Unit tests for the rate limiter.
@@ -14,6 +18,11 @@ interface MockEvent {
   method: string
   path: string
   _ip: string
+  context?: {
+    cloudflare?: {
+      env: Record<string, { limit: ReturnType<typeof vi.fn> }>
+    }
+  }
 }
 
 // Mock Nitro auto-imports
@@ -78,5 +87,34 @@ describe('enforceRateLimit', () => {
     }
     // IP B should still allow
     await expect(enforceRateLimit(eventB as never, 'test-ip', 2, 60_000)).resolves.toBeUndefined()
+  })
+})
+
+describe('enforceRateLimitPolicy', () => {
+  it('calls Cloudflare binding when configured', async () => {
+    const limit = vi.fn().mockResolvedValue({ success: true })
+    const event = createMockEvent('203.0.113.9')
+    event.context = { cloudflare: { env: { RL_60: { limit } } } }
+    await expect(
+      enforceRateLimitPolicy(event as never, RATE_LIMIT_POLICIES.authLogin),
+    ).resolves.toBeUndefined()
+    expect(limit).toHaveBeenCalledWith({ key: 'auth-login:203.0.113.9' })
+  })
+
+  it('throws 429 when Cloudflare binding rejects', async () => {
+    const limit = vi.fn().mockResolvedValue({ success: false })
+    const event = createMockEvent('203.0.113.10')
+    event.context = { cloudflare: { env: { RL_60: { limit } } } }
+    await expect(
+      enforceRateLimitPolicy(event as never, RATE_LIMIT_POLICIES.authLogin),
+    ).rejects.toThrow('Too many requests')
+  })
+
+  it('skips Cloudflare when binding is absent', async () => {
+    const event = createMockEvent('203.0.113.11')
+    event.context = { cloudflare: { env: {} } }
+    await expect(
+      enforceRateLimitPolicy(event as never, RATE_LIMIT_POLICIES.authLogin),
+    ).resolves.toBeUndefined()
   })
 })

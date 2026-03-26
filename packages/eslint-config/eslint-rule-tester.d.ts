@@ -13,7 +13,7 @@
 import 'eslint'
 
 declare module 'eslint' {
-  // eslint-disable-next-line @typescript-eslint/no-namespace
+  // eslint-disable-next-line @typescript-eslint/no-namespace -- RuleTester typings intentionally augment the eslint module namespace
   namespace RuleTester {
     let afterAll: ((fn: () => void) => void) | undefined
   }

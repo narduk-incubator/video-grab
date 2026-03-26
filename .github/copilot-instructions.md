@@ -2,14 +2,32 @@
 
 Read `AGENTS.md` at the project root for full project rules and conventions.
 
+## Repo skills
+
+If this repo ships committed skills for GitHub-facing agents, they live in
+`.github/skills/`. The template does not mirror, symlink, or repair local agent
+skill directories. Manage any local-only skills separately from this checkout.
+
+### Installing new skills
+
+```bash
+# From a GitHub repo (open standard)
+npx skills add https://github.com/<owner>/<repo> --skill <name>
+
+# Interactive scaffolding via agent workflow
+/skill-create
+```
+
+See `docs/agents/skills.md` for the manual-management rules.
+
 ## Architecture & Monorepo
 
 - **PNPM Workspace**: The main application lives in `apps/web/`.
 - **Shared Layer**: `layers/narduk-nuxt-layer/` provides standard modules (Nuxt
   UI 4, SEO, Auth), security middleware, and styling. **Do NOT recreate** what
   the layer already provides.
-- **Example Apps**: Reference `apps/showcase/` or `apps/example-*/` for working
-  implementations.
+- **Reference Apps**: Use `apps/showcase/` for the in-repo verification app and
+  `narduk-nuxt-template-examples` for full-featured reference implementations.
 
 ## Key Rules & Constraints
 
@@ -41,8 +59,12 @@ Read `AGENTS.md` at the project root for full project rules and conventions.
 
 ## Start & Automations
 
-- **CRITICAL**: If starting a new project, run `pnpm setup` first. Verify
-  `git remote -v` does NOT point to `narduk-enterprises/narduk-nuxt-template`.
+- **CRITICAL**: If starting a new derived project, begin from the generated
+  starter surface, not this authoring workspace. Use the control plane, a
+  published starter repo, or `pnpm run export:starter -- ../my-app --force`,
+  then work from that generated app checkout. Verify `git remote -v` does NOT
+  point to `narduk-enterprises/narduk-nuxt-template`. If you are intentionally
+  working on the template repository itself, that remote is expected.
 - **Secrets**: Use Doppler. Secrets are consumed via `process.env.SECRET_NAME`
   in `nuxt.config.ts`.
 - Run `/check-*` and `/audit-*` AI workflows (in `.agents/workflows/`) for

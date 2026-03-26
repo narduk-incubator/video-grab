@@ -44,8 +44,9 @@ export default {
     if (!testMode) {
       // Only run on app/ files (composables, pages, components, plugins, etc.)
       if (!normalized.includes('/app/')) return {}
-      // Exclude the legitimate fetch.client.ts plugin
+      // Exclude legitimate CSRF-safe wrappers that use $fetch.create()
       if (normalized.includes('plugins/fetch.client.')) return {}
+      if (normalized.includes('composables/useCsrfFetch.')) return {}
       // Exclude test files
       if (
         normalized.includes('.test.') ||

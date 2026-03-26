@@ -75,10 +75,23 @@ export function useMapKit() {
         }
         fetchDynamicToken()
           .then(done)
-          .catch((e) => {
-            error.value = e?.message || 'Failed to load MapKit token'
-            done('')
-          })
+          .catch(
+            (e: {
+              status?: number
+              statusCode?: number
+              data?: { message?: string }
+              message?: string
+            }) => {
+              const status = e?.statusCode ?? e?.status
+              if (status === 503) {
+                error.value =
+                  'MapKit is not configured. Set MAPKIT_TOKEN or APPLE_MAPKIT_TOKEN, or APPLE_SECRET_KEY + APPLE_TEAM_ID + APPLE_KEY_ID.'
+              } else {
+                error.value = e?.data?.message || e?.message || 'Failed to load MapKit token'
+              }
+              done('')
+            },
+          )
       }
       mapkit.init({ authorizationCallback })
       return mapkit

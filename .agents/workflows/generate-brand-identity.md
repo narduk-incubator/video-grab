@@ -31,14 +31,14 @@ screams "I'm a scaffold." Purge it completely before building the new identity.
 Search the entire `apps/web/` directory for these strings and replace or remove
 every occurrence:
 
-| Search For                                    | What It Is                               | Action                           |
-| --------------------------------------------- | ---------------------------------------- | -------------------------------- |
-| `Nuxt 4`                                      | Template name in text/headings           | Replace with app name            |
-| `N4`                                          | Template logo/icon reference             | Delete and replace with app logo |
-| `Demo`                                        | Placeholder qualifier                    | Remove or replace                |
-| `Template`                                    | Scaffold reference                       | Remove or replace                |
-| `nard.uk`                                     | Template domain (in UI text, not config) | Replace with app domain          |
-| Generic green `#10b981` or emerald references | Default template accent                  | Will be replaced in Phase 2      |
+| Search For                         | What It Is                               | Action                           |
+| ---------------------------------- | ---------------------------------------- | -------------------------------- |
+| `Nuxt 4`                           | Template name in text/headings           | Replace with app name            |
+| `N4`                               | Template logo/icon reference             | Delete and replace with app logo |
+| `Demo`                             | Placeholder qualifier                    | Remove or replace                |
+| `Template`                         | Scaffold reference                       | Remove or replace                |
+| App's scaffold domain              | Template domain (in UI text, not config) | Replace with custom app domain   |
+| Generic template accent references | Default template accent                  | Will be replaced in Phase 2      |
 
 ### 0b. Header/Navbar Decision
 
@@ -82,43 +82,7 @@ Before touching any design file, **immerse yourself** in the project.
    | _Warm & approachable_        | Earth tones, terracotta, sage     | Humanist sans (Atkinson Hyperlegible, DM Sans)  | Soft shadows, organic shapes     | Gentle, breathing   |
    | _Clean & modern_             | Neutrals with a single accent pop | Geometric sans (Outfit, Manrope, Space Grotesk) | Medium radius, flat surfaces     | Minimal, functional |
 
-4. **🚨 UNIQUENESS CHECK — Fleet Brand Registry.** Before choosing colors and
-   fonts, review the table below. This is every app in the Narduk fleet. **Your
-   choices MUST be distinct.** Do NOT reuse the same primary color + display
-   font combo as any existing app. Strongly prefer a primary color not already
-   heavily used.
-
-   | App                          | Primary          | Neutral | Display Font        | Body Font         |
-   | ---------------------------- | ---------------- | ------- | ------------------- | ----------------- |
-   | ai-media-gen                 | `violet`         | `slate` | Outfit              | Inter             |
-   | austin-texas-net             | `neutral`        | `stone` | Playfair Display    | Inter             |
-   | circuit-breaker-online       | `brand` (custom) | `zinc`  | Outfit              | Inter             |
-   | clawdle                      | `indigo`         | `slate` | Fredoka             | Nunito            |
-   | control-plane                | `blue`           | `slate` | (default)           | (default)         |
-   | drift-map                    | `teal`           | `stone` | Fraunces            | Manrope           |
-   | enigma-box                   | `violet`         | `slate` | Space Grotesk       | DM Sans           |
-   | favicon-checker              | `cyan`           | `slate` | Space Grotesk       | Inter             |
-   | flashcard-pro                | `indigo`         | `slate` | Plus Jakarta Sans   | DM Sans           |
-   | imessage-dictionary          | `amber`          | `stone` | Crimson Pro         | Inter             |
-   | nagolnagemluapleira          | `emerald`        | `slate` | Space Grotesk       | Inter             |
-   | narduk-enterprises-portfolio | `indigo`         | `slate` | Outfit              | Inter             |
-   | ogpreview-app                | `emerald`        | `slate` | (default)           | (default)         |
-   | old-austin-grouch            | `amber`          | `stone` | Playfair Display    | Inter             |
-   | papa-everetts-pizza          | `red`            | `slate` | Playfair Display SC | Karla             |
-   | sailing-passage-map          | —                | —       | —                   | —                 |
-   | tide-check                   | `cyan`           | `slate` | Outfit              | Inter             |
-   | tiny-invoice                 | `teal`           | `stone` | Plus Jakarta Sans   | (default)         |
-   | video-grab                   | `cyan`           | `zinc`  | Syne                | Plus Jakarta Sans |
-
-   **Overused — AVOID unless strongly justified:**
-   - Colors: `indigo` (3×), `cyan` (3×), `violet` (2×), `emerald` (2×), `teal`
-     (2×), `amber` (2×)
-   - Display fonts: Outfit (4×), Space Grotesk (3×), Playfair Display (3×), Plus
-     Jakarta Sans (2×)
-   - Body fonts: Inter (10×)
-
-   **🎨 PRE-BUILT SCHEME CATALOG — Pick one (or use as a starting point). All
-   are unique from the fleet above.**
+4. **🎨 PRE-BUILT SCHEME CATALOG — Pick one (or use as a starting point).**
 
    _Bold & Technical:_
 
@@ -271,16 +235,13 @@ Before touching any design file, **immerse yourself** in the project.
    | 100 | `amber`   | `neutral` | Chewy        | Cabin     |
 
 5. **Lock in a creative direction.** Decide on:
-   - **Primary Color** — a Nuxt UI / Tailwind color name. **Must not duplicate**
-     an overused color unless the display font creates a clearly different look.
+   - **Primary Color** — a Nuxt UI / Tailwind color name (e.g. `sky`, `amber`).
+     Pick something that fits the emotional register.
    - **Neutral Color** — the complementary gray scale (`slate`, `zinc`, `stone`,
      `neutral`, `gray`).
-   - **Display Font** — for headings. Must be from Google Fonts. **Must not
-     duplicate** an overused display font unless the primary color creates a
-     clearly different look.
+   - **Display Font** — for headings. Must be from Google Fonts.
    - **Body Font** — for text. Must be from Google Fonts. Prioritize
-     readability. **Avoid Inter** (used by 10+ apps) — pick something that gives
-     the app its own voice.
+     readability. Pick something that gives the app its own voice.
    - **Shape Language** — border radius scale, shadow intensity, spacing rhythm.
    - **Visual Tone** — glassmorphism vs. flat, light vs. dark mode bias,
      illustration vs. photography, dense vs. airy.
@@ -310,7 +271,11 @@ export default defineAppConfig({
 
 ### 2b. Set Tailwind v4 Theme Overrides
 
-Create or update `apps/web/app/assets/css/brand.css` (imported by `main.css`):
+Create or update `apps/web/app/assets/css/brand.css` (imported by `main.css`).
+
+> _Note: Do not hardcode hex colors for standard UI elements. Rely entirely on
+> Tailwind v4 CSS variables (e.g. `var(--color-primary-500)`) and semantic
+> classes (`text-primary`, `bg-neutral-100`) as enforced by Nuxt UI 4._
 
 ```css
 @theme {
@@ -442,6 +407,10 @@ pnpm generate:favicons -- \
   --bg="<background-hex>"
 ```
 
+> _Note: The favicon generator requires raw hex codes. You must manually resolve
+> your chosen Tailwind primary color (e.g. `sky-500` -> `#0ea5e9`) to its hex
+> equivalent for the `--color` flag._
+
 This produces:
 
 | Asset                  | Size    |
@@ -468,7 +437,7 @@ schemaOrg: {
 
 This is where the brand comes alive. Don't just configure — **design**.
 
-### 5a. Page Building with Nuxt UI Pro Components
+### 5a. Page Building with Nuxt UI 4 Components
 
 Use Nuxt UI v4's page-building primitives — never hand-roll what the framework
 provides:
@@ -599,8 +568,8 @@ Switch to dark mode and verify:
 
 | ❌ Anti-Pattern                                          | ✅ What to Do Instead                                   |
 | -------------------------------------------------------- | ------------------------------------------------------- |
-| Ship with the template's green N4 icon                   | Generate a distinctive app-specific logo                |
-| Use generic `emerald` as the primary color               | Choose a color that fits the brand's emotional register |
+| Ship with the scaffold's default icon                    | Generate a distinctive app-specific logo                |
+| Use generic default colors as the primary color          | Choose a color that fits the brand's emotional register |
 | Leave the navbar as "Home" + color toggle                | Remove the navbar or redesign it with real content      |
 | Use placeholder text ("Lorem ipsum", "Description here") | Write real, app-appropriate copy                        |
 | Skip dark mode testing                                   | Test and polish both modes                              |
@@ -623,5 +592,5 @@ Switch to dark mode and verify:
 | `--source`     | `<target>/favicon.svg`            | Source SVG path                 |
 | `--name`       | `Nuxt 4 App`                      | Full name in webmanifest        |
 | `--short-name` | First 12 chars of `--name`        | Short name in webmanifest       |
-| `--color`      | `#10b981`                         | Theme color in webmanifest      |
+| `--color`      | `#0ea5e9`                         | Theme color in webmanifest      |
 | `--bg`         | `#0B1120`                         | Background color in webmanifest |

@@ -150,6 +150,37 @@ export function defineSharedAuthContract(options: SharedAuthContractOptions = {}
       await expect(page.getByRole('heading', { name: dashboardHeading })).toBeVisible()
     })
 
+    test('local HTTP auth login omits the Secure session-cookie flag', async ({
+      page,
+      baseURL,
+    }) => {
+      test.skip(!baseURL?.startsWith('http://'), 'This check only applies to local HTTP dev.')
+
+      const email = createUniqueEmail(`${appName.replaceAll(/\s+/g, '-').toLowerCase()}-cookie`)
+      const password = 'password123'
+
+      await page.goto(registerPath)
+      await waitForHydration(page)
+      await registerViaApi(page, { name: 'Cookie User', email, password })
+      await logoutViaApi(page)
+
+      const loginResponsePromise = page.waitForResponse((response) => {
+        return (
+          new URL(response.url()).pathname === '/api/auth/login' &&
+          response.request().method() === 'POST'
+        )
+      })
+
+      await loginViaApi(page, { email, password })
+
+      const loginResponse = await loginResponsePromise
+      const setCookie = (await loginResponse.allHeaders())['set-cookie'] ?? ''
+
+      expect(setCookie).toContain('nuxt-session=')
+      expect(setCookie).toContain('SameSite=Lax')
+      expect(setCookie).not.toContain('Secure')
+    })
+
     test('authenticated users are redirected away from guest pages', async ({ page }) => {
       const email = createUniqueEmail(`${appName.replaceAll(/\s+/g, '-').toLowerCase()}-redirect`)
 

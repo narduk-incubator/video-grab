@@ -43,3 +43,4 @@ packages/eslint-config/*/dist/
 doppler.json
 doppler.yaml
 lint-results.txt
+.dev.vars

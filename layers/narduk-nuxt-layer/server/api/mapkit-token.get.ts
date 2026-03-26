@@ -39,7 +39,12 @@ export default defineEventHandler(async (event) => {
     return { token }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to generate MapKit JS token'
+    const isMisconfig = message.startsWith('MapKit JS:')
     log.error('MapKit token generation failed', { origin, error: message })
-    throw createError({ statusCode: 500, message })
+    throw createError({
+      statusCode: isMisconfig ? 503 : 500,
+      statusMessage: message,
+      message,
+    })
   }
 })

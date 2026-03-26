@@ -1,4 +1,4 @@
-#!/usr/bin/env npx jiti
+#!/usr/bin/env -S pnpm exec jiti
 /**
  * GENERATE-FAVICONS.TS — Centralized Favicon Generator
  * -------------------------------------------------------

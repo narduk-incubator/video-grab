@@ -1,4 +1,6 @@
 import { z } from 'zod'
+import { defineAdminMutation, withValidatedBody } from '#layer/server/utils/mutation'
+import { RATE_LIMIT_POLICIES } from '#layer/server/utils/rateLimit'
 
 const bodySchema = z.object({
   urls: z.array(z.string().url()).min(1).max(100),
@@ -16,65 +18,57 @@ const bodySchema = z.object({
  *
  * Requires GSC_SERVICE_ACCOUNT_JSON with the Indexing API enabled.
  */
-export default defineEventHandler(async (event) => {
-  const log = useLogger(event).child('Indexing')
-  await requireAdmin(event)
-  await enforceRateLimit(event, 'google-indexing-batch', 30, 60_000)
+export default defineAdminMutation(
+  {
+    rateLimit: RATE_LIMIT_POLICIES.googleIndexingBatch,
+    parseBody: withValidatedBody(bodySchema.parse),
+  },
+  async ({ event, body }) => {
+    const log = useLogger(event).child('Indexing')
+    const { urls, type } = body
+    const boundary = `===============${Date.now()}==`
+    const batchBody = buildBatchBody(urls, type, boundary)
+    const token = await getAccessToken(INDEXING_SCOPES)
 
-  const body = await readBody<unknown>(event)
-  const parsed = bodySchema.safeParse(body)
+    try {
+      const response = await fetch('https://indexing.googleapis.com/batch', {
+        method: 'POST',
+        headers: {
+          'Content-Type': `multipart/mixed; boundary="${boundary}"`,
+          Authorization: `Bearer ${token}`,
+        },
+        body: batchBody,
+      })
 
-  if (!parsed.success) {
-    throw createError({
-      statusCode: 400,
-      statusMessage: `Validation error: ${parsed.error.issues.map((i) => i.message).join(', ')}`,
-    })
-  }
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw createError({
+          statusCode: response.status,
+          statusMessage: `Google Indexing API batch error: ${errorText}`,
+        })
+      }
 
-  const { urls, type } = parsed.data as { urls: string[]; type: string }
-  const boundary = `===============${Date.now()}==`
-  const batchBody = buildBatchBody(urls, type, boundary)
+      const responseText = await response.text()
+      const responseBoundary =
+        response.headers.get('content-type')?.match(/boundary=(.+)/)?.[1] || boundary
+      const results = parseBatchResponse(responseText, responseBoundary)
 
-  const token = await getAccessToken(INDEXING_SCOPES)
+      log.info('Batch indexing submitted', { count: urls.length, type })
 
-  try {
-    const response = await fetch('https://indexing.googleapis.com/batch', {
-      method: 'POST',
-      headers: {
-        'Content-Type': `multipart/mixed; boundary="${boundary}"`,
-        Authorization: `Bearer ${token}`,
-      },
-      body: batchBody,
-    })
-
-    if (!response.ok) {
-      const errorText = await response.text()
+      return {
+        success: true,
+        submitted: urls.length,
+        type,
+        results,
+      }
+    } catch (error: unknown) {
+      if ((error as { statusCode?: number }).statusCode) throw error
+      const err = error as { message?: string }
+      log.error('Batch indexing failed', { count: urls.length, type, error: err.message })
       throw createError({
-        statusCode: response.status,
-        statusMessage: `Google Indexing API batch error: ${errorText}`,
+        statusCode: 500,
+        statusMessage: `Google Indexing API batch error: ${err.message}`,
       })
     }
-
-    const responseText = await response.text()
-    const responseBoundary =
-      response.headers.get('content-type')?.match(/boundary=(.+)/)?.[1] || boundary
-    const results = parseBatchResponse(responseText, responseBoundary)
-
-    return {
-      success: true,
-      submitted: urls.length,
-      type,
-      results,
-    }
-  } catch (error: unknown) {
-    if ((error as { statusCode?: number }).statusCode) throw error
-    const err = error as { message?: string }
-    log.error('Batch indexing failed', { count: urls.length, type, error: err.message })
-    throw createError({
-      statusCode: 500,
-      statusMessage: `Google Indexing API batch error: ${err.message}`,
-    })
-  }
-
-  log.info('Batch indexing submitted', { count: urls.length, type })
-})
+  },
+)

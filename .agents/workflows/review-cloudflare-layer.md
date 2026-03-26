@@ -286,10 +286,11 @@ Validate the deployment pipeline. Deployment is done **locally** via
 
 1. **Check deploy scripts:** // turbo
    `grep -n '"deploy"' */*/package.json 2>/dev/null`
-   - Expected pattern: `"deploy": "nuxt build && wrangler deploy"`. Both steps
-     must be present.
-   - Root package.json should have
-     `"deploy": "doppler run -- pnpm --filter web run deploy"`.
+   - Expected pattern: `"deploy": "wrangler deploy"`. `pnpm ship` runs
+     `pnpm build` in the app dir before `pnpm deploy`, so `deploy` must not
+     re-run `nuxt build`.
+   - For a one-off local deploy without ship, run `pnpm build` then
+     `pnpm deploy` (with Doppler as usual).
 
 2. **Check `/deploy` agent workflow has dirty-repo guard:** // turbo
    `grep -c 'porcelain' .agents/workflows/deploy.md`

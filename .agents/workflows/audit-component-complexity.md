@@ -57,8 +57,8 @@ Pages should be "Orchestrators", not "Implementers".
 
 1. **Reinventing the Wheel:** // turbo
    `grep -rn "button\|input\|select" app/components app/pages | grep -v "UButton\|UInput\|USelect" | head -10`
-   - Audit for raw HTML elements or custom CSS classes that mimic Nuxt UI Pro
-     components.
+   - Audit for raw HTML elements or custom CSS classes that mimic Nuxt UI
+     components or page-building patterns.
    - **Rule:** Use Nuxt UI components (`UButton`, `UInput`, etc.) for all
      primitive interactions to ensure design system consistency and built-in
      accessibility.

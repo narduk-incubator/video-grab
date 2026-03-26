@@ -1,19 +1,155 @@
-import { execSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { runCommand } from './command'
 
-function run(cmd: string, cwd = process.cwd()) {
-  console.log(`\n> ${cmd}`)
-  execSync(cmd, { stdio: 'inherit', cwd })
+type WranglerRoute = string | { pattern?: string; custom_domain?: boolean }
+
+function run(
+  command: string,
+  args: string[] = [],
+  cwd = process.cwd(),
+  env: NodeJS.ProcessEnv | undefined = undefined,
+) {
+  console.log(`\n> ${command} ${args.join(' ')}`.trim())
+  runCommand(command, args, { stdio: 'inherit', cwd, env })
 }
 
-function runQuiet(cmd: string, cwd = process.cwd()) {
+function tokenizeCommand(command: string): string[] {
+  const tokens = command.match(/"([^"\\]*(?:\\.[^"\\]*)*)"|'([^'\\]*(?:\\.[^'\\]*)*)'|([^\s"']+)/g)
+  if (!tokens) return []
+
+  return tokens.map((token) => {
+    if (token.startsWith('"') && token.endsWith('"')) {
+      return token.slice(1, -1)
+    }
+    if (token.startsWith("'") && token.endsWith("'")) {
+      return token.slice(1, -1)
+    }
+    return token
+  })
+}
+
+function parseMigrateCommand(rawCommand: string): string[] {
+  if (/[;&|`$<>]/.test(rawCommand)) {
+    throw new Error(`Unsafe db:migrate script: ${rawCommand}`)
+  }
+
+  const tokens = tokenizeCommand(rawCommand)
+  if (tokens.length === 0) {
+    throw new Error('Empty db:migrate script.')
+  }
+
+  return tokens
+}
+
+function getOutput(command: string, args: string[] = [], cwd = process.cwd()): string {
+  return runCommand(command, args, {
+    cwd,
+    encoding: 'utf-8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim()
+}
+
+function getUntrackedFiles(cwd: string): string[] {
+  const output = getOutput('git', ['ls-files', '--others', '--exclude-standard'], cwd)
+  if (!output) return []
+  return output
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+}
+
+function isLocalhostUrl(value: string | null | undefined): boolean {
+  if (!value) return false
+
   try {
-    return execSync(cmd, { cwd, stdio: ['ignore', 'pipe', 'ignore'] })
-      .toString()
-      .trim()
-  } catch (e) {
-    return ''
+    const hostname = new URL(value).hostname
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname.endsWith('.localhost')
+  } catch {
+    return false
+  }
+}
+
+function normalizeRoutePattern(pattern: string): string | null {
+  const trimmed = pattern.trim()
+  if (!trimmed) return null
+
+  const withoutScheme = trimmed.replace(/^[a-z]+:\/\//i, '')
+  const host = withoutScheme.split('/')[0]?.trim()
+  if (!host || host.includes('*')) return null
+
+  return `https://${host}`
+}
+
+function resolveCanonicalSiteUrl(appDir: string): string | null {
+  const wranglerPath = resolve(appDir, 'wrangler.json')
+  if (!existsSync(wranglerPath)) return null
+
+  try {
+    const parsed = JSON.parse(readFileSync(wranglerPath, 'utf8')) as {
+      routes?: WranglerRoute[]
+    }
+    const routes = Array.isArray(parsed.routes) ? parsed.routes : []
+
+    for (const route of routes) {
+      if (typeof route === 'string') {
+        const normalized = normalizeRoutePattern(route)
+        if (normalized) return normalized
+        continue
+      }
+
+      if (!route?.pattern) continue
+      if (route.custom_domain === false) continue
+
+      const normalized = normalizeRoutePattern(route.pattern)
+      if (normalized) return normalized
+    }
+  } catch (error) {
+    console.warn(`⚠️ Failed to parse wrangler.json for ${appDir}: ${String(error)}`)
+  }
+
+  return null
+}
+
+function getDopplerSiteUrl(appDir: string): string {
+  const envOutput = getOutput('doppler', ['run', '--', 'printenv'], appDir)
+
+  for (const line of envOutput.split('\n')) {
+    if (line.startsWith('SITE_URL=')) {
+      return line.slice('SITE_URL='.length).trim()
+    }
+  }
+
+  return ''
+}
+
+function resolveShipEnvironment(appDir: string): NodeJS.ProcessEnv | undefined {
+  const canonicalSiteUrl = resolveCanonicalSiteUrl(appDir)
+  const dopplerSiteUrl = getDopplerSiteUrl(appDir)
+
+  if (!canonicalSiteUrl) {
+    if (isLocalhostUrl(dopplerSiteUrl)) {
+      console.warn(
+        `⚠️ Doppler SITE_URL is localhost for ${appDir}, but no canonical route was found in wrangler.json.`,
+      )
+    }
+    return undefined
+  }
+
+  if (dopplerSiteUrl && !isLocalhostUrl(dopplerSiteUrl)) {
+    return undefined
+  }
+
+  const reason = dopplerSiteUrl ? `Doppler SITE_URL=${dopplerSiteUrl}` : 'Doppler SITE_URL is unset'
+  console.log(`Using canonical site URL ${canonicalSiteUrl} for build/deploy because ${reason}.`)
+
+  return {
+    ...process.env,
+    SITE_URL: canonicalSiteUrl,
+    APP_URL: canonicalSiteUrl,
+    NUXT_SITE_URL: canonicalSiteUrl,
+    NUXT_PUBLIC_SITE_URL: canonicalSiteUrl,
+    NUXT_PUBLIC_APP_URL: canonicalSiteUrl,
   }
 }
 
@@ -37,11 +173,12 @@ async function shipApp(appTarget: string) {
       hasMigrate = true
     }
   }
+  const shipEnv = resolveShipEnvironment(appDir)
 
   // 1. Build Verification
   console.log(`\n🏗️ Building ${appTarget}...`)
   try {
-    run(`doppler run -- pnpm --filter ${appTarget} run build`, appDir)
+    run('doppler', ['run', '--', 'pnpm', 'run', 'build'], appDir, shipEnv)
   } catch (error) {
     console.error(`\n❌ Build failed for ${appTarget}. Aborting ship to prevent broken commit.`)
     process.exit(1)
@@ -49,26 +186,31 @@ async function shipApp(appTarget: string) {
 
   // 2. Git operations
   console.log(`\n📦 Checking git status...`)
-  run('git add -A')
+  const untrackedFiles = getUntrackedFiles(appDir)
+  if (untrackedFiles.length > 0) {
+    console.log(`Ignoring untracked files during ship auto-commit: ${untrackedFiles.join(', ')}`)
+  }
+
+  run('git', ['add', '-u'], appDir)
 
   let hasChanges = false
   try {
-    execSync('git diff --cached --quiet')
+    runCommand('git', ['diff', '--cached', '--quiet'], { cwd: appDir })
   } catch (e) {
     hasChanges = true
   }
 
   if (hasChanges) {
     const date = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
-    run(`git commit -m "chore: ship ${date}"`)
+    run('git', ['commit', '-m', `chore: ship ${date}`], appDir)
   } else {
     console.log('No changes to commit.')
   }
 
   console.log(`\n🔄 Fetching remote...`)
-  run('git fetch')
+  run('git', ['fetch'], appDir)
   try {
-    execSync('git merge-base --is-ancestor @{u} HEAD')
+    runCommand('git', ['merge-base', '--is-ancestor', '@{u}', 'HEAD'], { cwd: appDir })
   } catch (e) {
     console.error(
       '\n❌ Remote has changes not in local branch. Run: git pull --rebase && pnpm ship\n',
@@ -77,45 +219,28 @@ async function shipApp(appTarget: string) {
   }
 
   console.log(`\n🚀 Pushing to remote...`)
-  run('git push')
+  run('git', ['push'], appDir)
 
   // 3. Remote Migrations
   if (hasMigrate && pkg) {
     console.log(`\n🗄️ Running remote D1 migrations for ${appTarget}...`)
     const migrateCmd = pkg.scripts['db:migrate'].replaceAll('--local', '--remote')
-    const escaped = migrateCmd.replace(/\$/g, '\\$').replace(/"/g, '\\"')
-    run(`doppler run -- bash -c "${escaped}"`, appDir)
+    const migrateArgs = parseMigrateCommand(migrateCmd)
+    run('doppler', ['run', '--', ...migrateArgs], appDir)
   }
 
   // 4. Deploy
   console.log(`\n☁️ Deploying ${appTarget} to Edge...`)
   try {
-    run(`doppler run -- pnpm --filter ${appTarget} run deploy`)
+    run('doppler', ['run', '--', 'pnpm', 'run', 'deploy'], appDir, shipEnv)
   } catch (error) {
     console.error(`\n❌ Deploy failed for ${appTarget}.`)
     process.exit(1)
   }
 
-  // 5. Fleet Registry Sync
-  console.log(`\n📡 Syncing with Control Plane Fleet Registry...`)
-  try {
-    const controlPlaneUrl =
-      process.env.CONTROL_PLANE_URL ||
-      runQuiet('doppler secrets get CONTROL_PLANE_URL --plain', appDir)
-    const siteUrl = process.env.SITE_URL || runQuiet('doppler secrets get SITE_URL --plain', appDir)
-    const appName =
-      process.env.APP_NAME || runQuiet('doppler secrets get APP_NAME --plain', appDir) || appTarget
-
-    if (controlPlaneUrl && siteUrl) {
-      const curlCmd = `curl -s -X PUT "${controlPlaneUrl}/api/fleet/apps/${appName}" -H "Content-Type: application/json" -d '{"url": "${siteUrl}", "isActive": true}'`
-      execSync(curlCmd, { stdio: 'ignore' })
-      console.log(`✅ Fleet registry synced for ${appName}.`)
-    } else {
-      console.log(`⏭ CONTROL_PLANE_URL or SITE_URL not set — skipping fleet sync.`)
-    }
-  } catch (e) {
-    console.log(`⚠️ Fleet sync failed (non-fatal).`)
-  }
+  console.log(
+    `\n📡 Control-plane fleet metadata is managed centrally; skipping ship-time registry mutation.`,
+  )
 
   console.log(`\n🎉 Successfully shipped ${appTarget}!`)
 }
@@ -126,17 +251,7 @@ async function main() {
 
   let targets = [targetArg]
 
-  if (targetArg === 'showcase') {
-    // Expand showcase macro
-    targets = [
-      'showcase',
-      'example-auth',
-      'example-blog',
-      'example-marketing',
-      'example-og-image',
-      'example-apple-maps',
-    ]
-  } else if (targetArg.includes(',')) {
+  if (targetArg.includes(',')) {
     targets = targetArg.split(',').map((t) => t.trim())
   }
 

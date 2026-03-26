@@ -50,7 +50,7 @@ server/
   middleware/         # CSRF protection, D1 injection
   routes/             # Dynamic routes (IndexNow key verification)
   utils/              # Cloudflare bindings (database, KV, R2, rate limiting)
-drizzle/              # SQL migration files
+drizzle/              # SQL migration files for layer-owned tables only
 scripts/              # Utility scripts (favicon generation)
 .agents/workflows/    # Antigravity audit workflows (run via /slash-commands)
 ```
@@ -95,17 +95,20 @@ Sitemap and robots.txt are automatic. OG image templates live in
 - **Thin Components, Thick Composables** — components subscribe to composables,
   pass props down, emit events up. No inline fetch or complex logic in
   templates.
+- **Tabs** — prefer `app/components/AppTabs.vue` plus
+  `app/composables/usePersistentTab.ts` instead of repeating route and storage
+  watchers in each downstream app.
 - **SSR-safe state** — use `useState()` or Pinia stores. Never use bare `ref()`
   at module scope (causes cross-request leaks).
 - **Data fetching** — always use `useAsyncData` or `useFetch`, never raw
   `$fetch` in `<script setup>`.
 - **Client-only code** — wrap `window`/`document` access in `onMounted` or
   `<ClientOnly>`.
+- **Database ownership** — this layer owns the shared D1 schema and the SQL in
+  `drizzle/`. Downstream apps must apply these migrations via their standard
+  `db:migrate` script and must not copy them into `apps/web/drizzle/`.
 
 ## Integrating this Layer into a New Project
-
-If you are an agent tasked with adding this layer to a new or existing Nuxt
-application, run the `/migrate-to-monorepo` workflow.
 
 Do **NOT** clone `narduk-nuxt-layer` directly to start a project. Start with
 `narduk-nuxt-template` instead.
@@ -125,7 +128,6 @@ Run these during development (Antigravity slash-commands):
 | `/check-seo-compliance`       | Audits pages for useSeo, Schema.org, and OG images             |
 | `/check-ssr-hydration-safety` | SSR safety, window access, isHydrated, ClientOnly, DOM nesting |
 | `/check-ui-styling`           | Tailwind v4 CSS import order, token usage, Nuxt UI v4          |
-| `/migrate-to-monorepo`        | Migration workflow to convert legacy apps to this monorepo     |
 | `/review-cloudflare-layer`    | Full review of Nuxt layer + Cloudflare Workers setup           |
 | `/review-doppler-pattern`     | Audit Doppler secret management for completeness and security  |
 | `/score-repo`                 | Full repo audit — scores 19 categories out of 10               |
@@ -173,8 +175,11 @@ apps **inherit these automatically** and do not need to repeat them:
 - `app/error.vue` — Branded error page (404/500)
 - `app/assets/css/main.css` — Tailwind v4 `@theme` tokens, glass/card utility
   classes
-- `app/composables/useSeo.ts`, `useSchemaOrg.ts`
-- `app/plugins/gtag.client.ts`, `posthog.client.ts`, `fetch.client.ts`
+- `app/composables/useSeo.ts`, `useSchemaOrg.ts`, `usePersistentTab.ts`
+- `app/components/AppTabs.vue`
+- `app/plugins/gtag.client.ts`, `posthog.client.ts`, `fetch.client.ts`,
+  `app/composables/usePosthog.ts` (client `capture` / `identify` / `reset`
+  helpers)
 - `app/types/api.ts`, `runtime-config.d.ts`
 
 **Public assets** (default favicons — apps override by placing their own in
@@ -200,5 +205,6 @@ apps **inherit these automatically** and do not need to repeat them:
 The opt-in feature recipes (Auth, Analytics, Content, Testing, UI Components,
 Forms) are application-level concerns.
 
-For full instructions on how to implement them, please refer to the
-**[Workspace Root AGENTS.md](../../AGENTS.md)**.
+For full instructions on how to implement them, refer to
+**[docs/agents/recipes.md](../../docs/agents/recipes.md)** and
+**[docs/e2e-testing.md](../../docs/e2e-testing.md)**.

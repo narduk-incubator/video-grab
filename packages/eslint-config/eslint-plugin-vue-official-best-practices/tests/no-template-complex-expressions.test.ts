@@ -79,6 +79,15 @@ ruleTester.run('no-template-complex-expressions', rule, {
         </template>
       `,
     },
+    // Two-arg function call (allowed by maxCallArgs default of 2)
+    {
+      filename: 'test.vue',
+      code: `
+        <template>
+          <div>{{ handleJoin(wager.id, payload) }}</div>
+        </template>
+      `,
+    },
   ],
   invalid: [
     // Nested ternary (still flagged)
@@ -95,7 +104,7 @@ ruleTester.run('no-template-complex-expressions', rule, {
         },
       ],
     },
-    // Multi-arg function call (exceeds maxCallArgs default of 1)
+    // Multi-arg function call (exceeds maxCallArgs default of 2)
     {
       filename: 'test.vue',
       code: `

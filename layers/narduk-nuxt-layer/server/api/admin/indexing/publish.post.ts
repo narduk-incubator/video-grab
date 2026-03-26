@@ -1,4 +1,6 @@
 import { z } from 'zod'
+import { defineAdminMutation, withValidatedBody } from '#layer/server/utils/mutation'
+import { RATE_LIMIT_POLICIES } from '#layer/server/utils/rateLimit'
 
 const bodySchema = z.object({
   url: z.string().url(),
@@ -22,47 +24,40 @@ const bodySchema = z.object({
  *     -H "Content-Type: application/json" \
  *     -d '{"url": "https://your-site.com/jobs/42", "type": "URL_UPDATED"}'
  */
-export default defineEventHandler(async (event) => {
-  const log = useLogger(event).child('Indexing')
-  await requireAdmin(event)
-  await enforceRateLimit(event, 'google-indexing-publish', 50, 60_000)
+export default defineAdminMutation(
+  {
+    rateLimit: RATE_LIMIT_POLICIES.googleIndexingPublish,
+    parseBody: withValidatedBody(bodySchema.parse),
+  },
+  async ({ event, body }) => {
+    const log = useLogger(event).child('Indexing')
+    const { url, type } = body
 
-  const body = await readBody<unknown>(event)
-  const parsed = bodySchema.safeParse(body)
+    try {
+      const data = await googleApiFetch(
+        'https://indexing.googleapis.com/v3/urlNotifications:publish',
+        INDEXING_SCOPES,
+        {
+          method: 'POST',
+          body: JSON.stringify({ url, type }),
+        },
+      )
 
-  if (!parsed.success) {
-    throw createError({
-      statusCode: 400,
-      statusMessage: `Validation error: ${parsed.error.issues.map((i) => i.message).join(', ')}`,
-    })
-  }
+      log.info('URL published to indexing', { url, type })
 
-  const { url, type } = parsed.data
-
-  try {
-    const data = await googleApiFetch(
-      'https://indexing.googleapis.com/v3/urlNotifications:publish',
-      INDEXING_SCOPES,
-      {
-        method: 'POST',
-        body: JSON.stringify({ url, type }),
-      },
-    )
-
-    log.info('URL published to indexing', { url, type })
-
-    return {
-      success: true,
-      url,
-      type,
-      metadata: data,
+      return {
+        success: true,
+        url,
+        type,
+        metadata: data,
+      }
+    } catch (error: unknown) {
+      const err = error as { statusCode?: number; statusMessage?: string; message?: string }
+      log.error('URL publish failed', { url, error: err.statusMessage || err.message })
+      throw createError({
+        statusCode: err.statusCode || 500,
+        statusMessage: `Google Indexing API error: ${err.statusMessage || err.message}`,
+      })
     }
-  } catch (error: unknown) {
-    const err = error as { statusCode?: number; statusMessage?: string; message?: string }
-    log.error('URL publish failed', { url, error: err.statusMessage || err.message })
-    throw createError({
-      statusCode: err.statusCode || 500,
-      statusMessage: `Google Indexing API error: ${err.statusMessage || err.message}`,
-    })
-  }
-})
+  },
+)
