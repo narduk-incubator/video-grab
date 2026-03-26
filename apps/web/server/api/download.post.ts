@@ -1,3 +1,4 @@
+import { definePublicMutation, withValidatedBody } from '#layer/server/utils/mutation'
 import { z } from 'zod'
 
 const X_TWITTER_HOSTS = ['x.com', 'twitter.com', 'www.x.com', 'www.twitter.com', 'mobile.twitter.com', 'mobile.x.com']
@@ -68,98 +69,92 @@ const bodySchema = z.object({
   url: z.string().min(1, 'URL is required').transform((s) => s.trim()),
 })
 
-export default defineEventHandler(async (event) => {
-  await enforceRateLimit(event, 'download', 10, 60_000)
+const rateLimit = { namespace: 'download', maxRequests: 10, windowMs: 60_000 }
 
-  const body = await readBody<unknown>(event)
-  const parsed = bodySchema.safeParse(body)
+export default definePublicMutation(
+  {
+    rateLimit,
+    parseBody: withValidatedBody(bodySchema.parse),
+  },
+  async ({ body: { url } }) => {
+    if (!isXOrTwitterUrl(url)) {
+      throw createError({
+        statusCode: 400,
+        message: 'Only X (Twitter) links are supported. Please paste an x.com or twitter.com video link.',
+      })
+    }
 
-  if (!parsed.success) {
-    throw createError({
-      statusCode: 400,
-      message: parsed.error.issues.map((i) => i.message).join(', '),
-    })
-  }
+    const tweetId = extractTweetId(url)
+    if (!tweetId) {
+      throw createError({
+        statusCode: 400,
+        message: 'Invalid X/Twitter link. Use a tweet URL like https://x.com/username/status/1234567890',
+      })
+    }
 
-  const { url } = parsed.data
+    const syndicationUrl = new URL('https://cdn.syndication.twimg.com/tweet-result')
+    syndicationUrl.searchParams.set('id', tweetId)
+    syndicationUrl.searchParams.set('lang', 'en')
+    syndicationUrl.searchParams.set('features', SYNDICATION_FEATURES)
+    syndicationUrl.searchParams.set('token', getSyndicationToken(tweetId))
 
-  if (!isXOrTwitterUrl(url)) {
-    throw createError({
-      statusCode: 400,
-      message: 'Only X (Twitter) links are supported. Please paste an x.com or twitter.com video link.',
-    })
-  }
+    let res: Response
+    try {
+      res = await fetch(syndicationUrl.toString(), {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          Accept: 'application/json',
+        },
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      throw createError({
+        statusCode: 502,
+        message: `Could not reach X: ${message}`,
+      })
+    }
 
-  const tweetId = extractTweetId(url)
-  if (!tweetId) {
-    throw createError({
-      statusCode: 400,
-      message: 'Invalid X/Twitter link. Use a tweet URL like https://x.com/username/status/1234567890',
-    })
-  }
+    const isJson = res.headers.get('content-type')?.includes('application/json')
+    const raw = isJson ? await res.json() : undefined
 
-  const syndicationUrl = new URL('https://cdn.syndication.twimg.com/tweet-result')
-  syndicationUrl.searchParams.set('id', tweetId)
-  syndicationUrl.searchParams.set('lang', 'en')
-  syndicationUrl.searchParams.set('features', SYNDICATION_FEATURES)
-  syndicationUrl.searchParams.set('token', getSyndicationToken(tweetId))
+    if (!res.ok) {
+      const errMsg = raw && typeof raw === 'object' && 'error' in raw && typeof (raw as { error: unknown }).error === 'string'
+        ? (raw as { error: string }).error
+        : 'Could not fetch tweet. The tweet may be private, deleted, or unavailable.'
+      throw createError({
+        statusCode: 502,
+        message: errMsg,
+      })
+    }
 
-  let res: Response
-  try {
-    res = await fetch(syndicationUrl.toString(), {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        Accept: 'application/json',
-      },
-    })
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    throw createError({
-      statusCode: 502,
-      message: `Could not reach X: ${message}`,
-    })
-  }
+    if (!raw || typeof raw !== 'object' || Object.keys(raw).length === 0) {
+      throw createError({
+        statusCode: 502,
+        message: 'X returned no data for this tweet. It may be private, deleted, or temporarily unavailable.',
+      })
+    }
 
-  const isJson = res.headers.get('content-type')?.includes('application/json')
-  const raw = isJson ? await res.json() : undefined
+    const rawObj = raw as Record<string, unknown>
+    if (rawObj.__typename === 'TweetTombstone') {
+      throw createError({
+        statusCode: 403,
+        message: 'This tweet is unavailable (private or removed by the account owner).',
+      })
+    }
 
-  if (!res.ok) {
-    const errMsg = raw && typeof raw === 'object' && 'error' in raw && typeof (raw as { error: unknown }).error === 'string'
-      ? (raw as { error: string }).error
-      : 'Could not fetch tweet. The tweet may be private, deleted, or unavailable.'
-    throw createError({
-      statusCode: 502,
-      message: errMsg,
-    })
-  }
+    const data = raw as SyndicationTweet
 
-  if (!raw || typeof raw !== 'object' || Object.keys(raw).length === 0) {
-    throw createError({
-      statusCode: 502,
-      message: 'X returned no data for this tweet. It may be private, deleted, or temporarily unavailable.',
-    })
-  }
+    const { bestUrl, variants } = extractVideoVariants(data)
+    if (!bestUrl) {
+      throw createError({
+        statusCode: 422,
+        message: 'No video found in this tweet. It may be an image, text-only, or the video is not available.',
+      })
+    }
 
-  const rawObj = raw as Record<string, unknown>
-  if (rawObj.__typename === 'TweetTombstone') {
-    throw createError({
-      statusCode: 403,
-      message: 'This tweet is unavailable (private or removed by the account owner).',
-    })
-  }
-
-  const data = raw as SyndicationTweet
-
-  const { bestUrl, variants } = extractVideoVariants(data)
-  if (!bestUrl) {
-    throw createError({
-      statusCode: 422,
-      message: 'No video found in this tweet. It may be an image, text-only, or the video is not available.',
-    })
-  }
-
-  return { success: true, videoUrl: bestUrl, tweetId, variants }
-})
+    return { success: true, videoUrl: bestUrl, tweetId, variants }
+  },
+)
 
 function isMp4Variant(v: SyndicationMediaVariant): boolean {
   return (

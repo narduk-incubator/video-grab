@@ -1,4 +1,6 @@
-import { test, expect } from '@playwright/test'
+import * as playwright from '@playwright/test'
+
+const { test, expect } = playwright
 
 /**
  * E2E tests expect the Video Grab app at http://localhost:3000 (not the default Nuxt welcome).
