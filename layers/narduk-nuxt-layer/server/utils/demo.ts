@@ -1,6 +1,6 @@
 import type { H3Event } from 'h3'
 import { eq } from 'drizzle-orm'
-import { users } from '../database/schema'
+import { users } from '#layer/orm-tables'
 import { useDatabase } from './database'
 
 const DEFAULT_DEMO_REDIRECT_PATH = '/dashboard'

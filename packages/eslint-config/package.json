@@ -9,7 +9,7 @@
   "scripts": {
     "build": "pnpm --dir eslint-plugin-nuxt-guardrails build && pnpm --dir eslint-plugin-nuxt-ui build && pnpm --dir eslint-plugin-vue-official-best-practices build",
     "test": "echo 'No tests in workspace shim — tests live in @narduk-enterprises/eslint-config'",
-    "format:check": "prettier --check \"**/*.{ts,mts,vue,js,mjs,json,yaml,yml,css,md}\" --ignore-path ../../.gitignore"
+    "format:check": "prettier --check \"**/*.{ts,mts,vue,js,mjs,json,yaml,yml,css,md}\" --ignore-path ../../.gitignore --ignore-path ../../.prettierignore"
   },
   "dependencies": {
     "@narduk-enterprises/eslint-config": "^1.0.17",

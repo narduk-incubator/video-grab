@@ -1,8 +1,8 @@
 import type { H3Event } from 'h3'
 import { getCookie, setCookie, deleteCookie, getRequestHeader } from 'h3'
 import { eq, and, gt } from 'drizzle-orm'
-import type { User } from '../database/schema'
-import { sessions, users, apiKeys } from '../database/schema'
+import type { User } from '#layer/orm-tables'
+import { sessions, users, apiKeys } from '#layer/orm-tables'
 
 /**
  * Session & authentication utilities.

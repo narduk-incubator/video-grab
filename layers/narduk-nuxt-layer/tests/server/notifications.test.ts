@@ -50,7 +50,7 @@ vi.mock('drizzle-orm', () => ({
   count: vi.fn(() => 'count(*)'),
 }))
 
-vi.mock('../../server/database/schema', () => ({
+vi.mock('#layer/orm-tables', () => ({
   notifications: {
     id: 'id',
     userId: 'user_id',

@@ -39,7 +39,7 @@ vi.mock('drizzle-orm', () => ({
   gt: vi.fn((_col, val) => ({ column: 'gt', value: val })),
 }))
 
-vi.mock('../../server/database/schema', () => ({
+vi.mock('#layer/orm-tables', () => ({
   users: {
     id: 'id',
     email: 'email',

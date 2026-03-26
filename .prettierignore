@@ -1,3 +1,8 @@
+# Cloudflare Wrangler — frequently touched by provisioning and wrangler CLI;
+# formatting churn does not buy much and breaks fleet quality checks.
+**/wrangler.json
+**/wrangler.jsonc
+
 # pnpm v9+ lockfile uses YAML keys Prettier cannot parse
 pnpm-lock.yaml
 # Accidental ESLint output dumps (not valid JSON for Prettier)

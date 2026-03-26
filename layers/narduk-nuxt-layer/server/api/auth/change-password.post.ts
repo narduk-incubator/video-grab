@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { eq } from 'drizzle-orm'
-import { users } from '../../database/schema'
+import { users } from '#layer/orm-tables'
 import { defineUserMutation, withValidatedBody } from '#layer/server/utils/mutation'
 import { verifyUserPassword, hashUserPassword } from '../../utils/password'
 import { RATE_LIMIT_POLICIES } from '../../utils/rateLimit'

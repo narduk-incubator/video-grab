@@ -1,7 +1,7 @@
 import type { H3Event } from 'h3'
 import { eq, and, desc, count } from 'drizzle-orm'
-import { notifications } from '../database/schema'
-import type { Notification } from '../database/schema'
+import { notifications } from '#layer/orm-tables'
+import type { Notification } from '#layer/orm-tables'
 
 /**
  * In-app notification service.

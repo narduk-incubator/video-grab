@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { useDatabase } from '#layer/server/utils/database'
-import { users } from '#layer/server/database/schema'
+import { users } from '#layer/orm-tables'
 import { defineAdminMutation, withValidatedBody } from '#layer/server/utils/mutation'
 import { RATE_LIMIT_POLICIES } from '#layer/server/utils/rateLimit'
 

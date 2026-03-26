@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm'
-import { systemPrompts } from '../database/schema'
+import { systemPrompts } from '#layer/orm-tables'
 import { useDatabase } from './database'
 import type { H3Event } from 'h3'
 

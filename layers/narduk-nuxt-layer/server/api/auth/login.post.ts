@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { users } from '../../database/schema'
+import { users } from '#layer/orm-tables'
 import { eq } from 'drizzle-orm'
 import { definePublicMutation, withValidatedBody } from '#layer/server/utils/mutation'
 import { verifyUserPassword } from '../../utils/password'

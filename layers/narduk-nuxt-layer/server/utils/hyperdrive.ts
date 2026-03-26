@@ -1,7 +1,7 @@
 import type { H3Event } from 'h3'
 
 /**
- * Cloudflare Hyperdrive binding surface used by drivers such as `postgres` (postgres.js).
+ * Cloudflare Hyperdrive binding surface (Postgres via `postgres.js` + Drizzle).
  * @see https://developers.cloudflare.com/hyperdrive/concepts/how-hyperdrive-works/
  */
 export type HyperdriveBinding = {
@@ -16,10 +16,9 @@ function cloudflareEnv(event: H3Event): Record<string, unknown> | undefined {
  * Returns Hyperdrive’s connection string for the binding named in runtime config
  * (`hyperdriveBinding`, default `HYPERDRIVE`).
  *
- * Production: binding comes from wrangler `hyperdrive` (deployed config).
- * Local `nuxt dev`: use `nitro-cloudflare-dev` with a wrangler env that declares
- * Hyperdrive, and set `CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_<BINDING>`
- * or `localConnectionString` on that binding.
+ * Production: binding comes from wrangler `hyperdrive`.
+ * Local `nuxt dev`: use `nitro-cloudflare-dev` with Hyperdrive in wrangler, and set
+ * `CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_<BINDING>` or `localConnectionString`.
  */
 export function useHyperdriveConnectionString(event: H3Event): string {
   const { hyperdriveBinding } = useRuntimeConfig()

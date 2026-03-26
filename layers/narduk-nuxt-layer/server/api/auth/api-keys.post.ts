@@ -1,5 +1,5 @@
 import { generateApiKey } from '#layer/server/utils/auth'
-import { apiKeys } from '#layer/server/database/schema'
+import { apiKeys } from '#layer/orm-tables'
 import { defineUserMutation, withValidatedBody } from '#layer/server/utils/mutation'
 import { RATE_LIMIT_POLICIES } from '#layer/server/utils/rateLimit'
 import { z } from 'zod'

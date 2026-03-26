@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useHyperdriveConnectionString } from '../../server/utils/hyperdrive'
 
 vi.stubGlobal('createError', (opts: { statusCode: number; message: string }) => {
@@ -7,11 +7,16 @@ vi.stubGlobal('createError', (opts: { statusCode: number; message: string }) => 
   return err
 })
 
-vi.stubGlobal('useRuntimeConfig', () => ({
+const mockUseRuntimeConfig = vi.fn(() => ({
   hyperdriveBinding: 'HYPERDRIVE',
 }))
+vi.stubGlobal('useRuntimeConfig', mockUseRuntimeConfig)
 
 describe('useHyperdriveConnectionString', () => {
+  beforeEach(() => {
+    mockUseRuntimeConfig.mockReturnValue({ hyperdriveBinding: 'HYPERDRIVE' })
+  })
+
   it('throws when binding is missing', () => {
     const event = { context: { cloudflare: { env: {} } } }
     expect(() => useHyperdriveConnectionString(event as never)).toThrow(
@@ -19,36 +24,30 @@ describe('useHyperdriveConnectionString', () => {
     )
   })
 
-  it('throws when cloudflare context is absent', () => {
+  it('throws when cloudflare env is absent', () => {
     const event = { context: {} }
     expect(() => useHyperdriveConnectionString(event as never)).toThrow(
       'Hyperdrive binding "HYPERDRIVE" is missing',
     )
   })
 
-  it('returns connectionString when binding is present', () => {
+  it('returns connection string from default binding', () => {
     const event = {
       context: {
         cloudflare: {
-          env: {
-            HYPERDRIVE: { connectionString: 'postgres://localhost:5432/app' },
-          },
+          env: { HYPERDRIVE: { connectionString: 'postgres://localhost:5432/app' } },
         },
       },
     }
     expect(useHyperdriveConnectionString(event as never)).toBe('postgres://localhost:5432/app')
   })
 
-  it('uses custom binding name from runtime config', () => {
-    vi.stubGlobal('useRuntimeConfig', () => ({
-      hyperdriveBinding: 'MY_PG',
-    }))
+  it('respects custom hyperdriveBinding in runtime config', () => {
+    mockUseRuntimeConfig.mockReturnValue({ hyperdriveBinding: 'MY_PG' })
     const event = {
       context: {
         cloudflare: {
-          env: {
-            MY_PG: { connectionString: 'postgres://example/db' },
-          },
+          env: { MY_PG: { connectionString: 'postgres://example/db' } },
         },
       },
     }

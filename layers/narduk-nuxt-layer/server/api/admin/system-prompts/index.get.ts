@@ -1,6 +1,6 @@
 import { requireAdmin } from '../../../utils/auth'
 import { useDatabase } from '../../../utils/database'
-import { systemPrompts } from '../../../database/schema'
+import { systemPrompts } from '#layer/orm-tables'
 
 export default defineEventHandler(async (event) => {
   await requireAdmin(event)

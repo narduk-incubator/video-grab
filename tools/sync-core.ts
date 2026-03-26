@@ -565,6 +565,34 @@ function patchRootPackage(
   return touched
 }
 
+function patchDopplerTemplate(
+  appDir: string,
+  dryRun: boolean,
+  mode: 'full' | 'layer',
+  log: (message: string) => void,
+): boolean {
+  if (mode !== 'full') return false
+
+  const appPackagePath = join(appDir, 'package.json')
+  const dopplerTemplatePath = join(appDir, 'doppler.template.yaml')
+  if (!existsSync(appPackagePath) || !existsSync(dopplerTemplatePath)) return false
+
+  const appPackage = JSON.parse(readFileSync(appPackagePath, 'utf-8')) as { name?: string }
+  const appName = appPackage.name?.trim()
+  if (!appName) return false
+
+  const content = readFileSync(dopplerTemplatePath, 'utf-8')
+  const updated = content.replace(/^(\s*project:\s*).+$/m, `$1${appName}`)
+  if (updated === content) return false
+
+  log('  UPDATE: doppler.template.yaml project')
+  if (!dryRun) {
+    writeFileSync(dopplerTemplatePath, updated, 'utf-8')
+  }
+
+  return true
+}
+
 /**
  * `apps/web/wrangler.json` is not copied verbatim (would wipe D1 ids, routes,
  * domains). When the layer expects Workers KV, merge a missing `KV` binding
@@ -623,12 +651,19 @@ function patchWebPackage(
     dependencies?: Record<string, string>
     devDependencies?: Record<string, string>
   }
+  const drizzleConfigPath = join(appDir, 'apps/web/drizzle.config.ts')
+  const drizzleConfig = existsSync(drizzleConfigPath)
+    ? readFileSync(drizzleConfigPath, 'utf-8')
+    : ''
+  const usesPostgresDrizzle = /\bdialect:\s*['"]postgres(?:ql)?['"]/.test(drizzleConfig)
 
   let touched = false
   patchJsonFile<Record<string, any>>(
     webPackagePath,
     (pkg) => {
       let changed = false
+      const usesPostgres =
+        usesPostgresDrizzle || Boolean(pkg.dependencies?.postgres || pkg.devDependencies?.postgres)
 
       pkg.scripts = pkg.scripts || {}
       if (mode === 'full') {
@@ -637,6 +672,9 @@ function patchWebPackage(
           changed = true
         }
         for (const [name, command] of Object.entries(FLEET_WEB_SCRIPT_PATCHES)) {
+          if (usesPostgres && name === 'dev') {
+            continue
+          }
           if (pkg.scripts[name] !== command) {
             pkg.scripts[name] = command
             changed = true
@@ -645,7 +683,7 @@ function patchWebPackage(
       }
 
       const wranglerPath = join(appDir, 'apps/web/wrangler.json')
-      if (existsSync(wranglerPath)) {
+      if (!usesPostgres && existsSync(wranglerPath)) {
         const wrangler = JSON.parse(readFileSync(wranglerPath, 'utf-8')) as {
           d1_databases?: Array<{ database_name?: string }>
         }
@@ -1000,6 +1038,7 @@ export async function runAppSync(options: RunAppSyncOptions) {
 
   const packageTouched = patchRootPackage(options.appDir, options.templateDir, dryRun, mode, log)
   patchWebPackage(options.appDir, options.templateDir, dryRun, mode, log)
+  patchDopplerTemplate(options.appDir, dryRun, mode, log)
   mergeWebWranglerKvBinding(options.appDir, options.templateDir, dryRun, mode, log)
   if (mode === 'full') {
     patchGitignore(options.appDir, dryRun, log)

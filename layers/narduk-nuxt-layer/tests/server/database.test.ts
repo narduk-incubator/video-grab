@@ -1,15 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 /**
- * Unit tests for the useDatabase server utility.
- *
- * Tests the per-request Drizzle instantiation pattern for both backends:
- * - D1 (default): Throws when D1 binding is missing, creates instance when present
- * - Postgres: Throws when Hyperdrive binding is missing, creates instance when present
- * - Both: Memoizes on event.context._db
+ * Unit tests for useDatabase (D1 + Postgres via Hyperdrive).
  */
 
-// Mock Nitro auto-imports
 vi.stubGlobal('createError', (opts: { statusCode: number; message: string }) => {
   const err = new Error(opts.message) as Error & { statusCode: number }
   err.statusCode = opts.statusCode
@@ -22,24 +16,44 @@ const mockUseRuntimeConfig = vi.fn(() => ({
 }))
 vi.stubGlobal('useRuntimeConfig', mockUseRuntimeConfig)
 
-// Mock drizzle-orm/d1
+const mockD1Drizzle = vi.fn(() => ({ __mock: true, __backend: 'd1' }))
+
+const mockPgSelectExecute = vi.fn(async () => [{ id: 'u_1' }, { id: 'u_2' }])
+const mockPgUpdateExecute = vi.fn(async () => ({ count: 1 }))
+const mockPgDb = {
+  __mock: true,
+  __backend: 'postgres',
+  select: vi.fn(() => ({
+    from: vi.fn(() => ({
+      where: vi.fn(() => ({
+        execute: mockPgSelectExecute,
+      })),
+    })),
+  })),
+  update: vi.fn(() => ({
+    set: vi.fn(() => ({
+      where: vi.fn(() => ({
+        execute: mockPgUpdateExecute,
+      })),
+    })),
+  })),
+}
+
 vi.mock('drizzle-orm/d1', () => ({
-  drizzle: vi.fn(() => ({ __mock: true, __backend: 'd1' })),
+  drizzle: (...args: unknown[]) => mockD1Drizzle(...args),
 }))
 
-// Mock drizzle-orm/neon-http
-vi.mock('drizzle-orm/neon-http', () => ({
-  drizzle: vi.fn(() => ({ __mock: true, __backend: 'postgres' })),
+vi.mock('drizzle-orm/postgres-js', () => ({
+  drizzle: vi.fn(() => mockPgDb),
 }))
 
-// Mock @neondatabase/serverless
-vi.mock('@neondatabase/serverless', () => ({
-  neon: vi.fn(() => ({ __neonSql: true })),
+vi.mock('postgres', () => ({
+  default: vi.fn(() => ({ __pgClient: true })),
 }))
 
 vi.mock('../../server/database/schema', () => ({}))
+vi.mock('../../server/database/pg-schema', () => ({}))
 
-// Must import AFTER mocks are set up
 const { useDatabase } = await import('../../server/utils/database')
 
 describe('useDatabase — D1 backend (default)', () => {
@@ -48,6 +62,11 @@ describe('useDatabase — D1 backend (default)', () => {
       databaseBackend: 'd1',
       hyperdriveBinding: 'HYPERDRIVE',
     })
+    mockD1Drizzle.mockClear()
+    mockPgSelectExecute.mockClear()
+    mockPgUpdateExecute.mockClear()
+    mockPgDb.select.mockClear()
+    mockPgDb.update.mockClear()
   })
 
   it('throws 500 when D1 binding is not available', () => {
@@ -71,7 +90,6 @@ describe('useDatabase — D1 backend (default)', () => {
       },
     }
     const db = useDatabase(event as never)
-    expect(db).toBeDefined()
     expect(db).toEqual({ __mock: true, __backend: 'd1' })
   })
 
@@ -80,31 +98,21 @@ describe('useDatabase — D1 backend (default)', () => {
     const event = {
       context: { _db: existingDb },
     }
-    const db = useDatabase(event as never)
-    expect(db).toBe(existingDb)
+    expect(useDatabase(event as never)).toBe(existingDb)
   })
 })
 
-describe('useDatabase — Postgres backend', () => {
+describe('useDatabase — Postgres backend (Hyperdrive)', () => {
   beforeEach(() => {
     mockUseRuntimeConfig.mockReturnValue({
       databaseBackend: 'postgres',
       hyperdriveBinding: 'HYPERDRIVE',
     })
-  })
-
-  it('throws 500 when Hyperdrive binding is not available', () => {
-    const event = {
-      context: { cloudflare: { env: {} } },
-    }
-    expect(() => useDatabase(event as never)).toThrow('Hyperdrive binding')
-  })
-
-  it('throws 500 when cloudflare context is missing', () => {
-    const event = {
-      context: {},
-    }
-    expect(() => useDatabase(event as never)).toThrow('Hyperdrive binding')
+    mockD1Drizzle.mockClear()
+    mockPgSelectExecute.mockClear()
+    mockPgUpdateExecute.mockClear()
+    mockPgDb.select.mockClear()
+    mockPgDb.update.mockClear()
   })
 
   it('returns a Drizzle PG instance when Hyperdrive binding exists', () => {
@@ -116,25 +124,28 @@ describe('useDatabase — Postgres backend', () => {
       },
     }
     const db = useDatabase(event as never)
-    expect(db).toBeDefined()
-    expect(db).toEqual({ __mock: true, __backend: 'postgres' })
+    expect(db.__backend).toBe('postgres')
   })
 
-  it('supports a custom Hyperdrive binding name', () => {
-    mockUseRuntimeConfig.mockReturnValue({
-      databaseBackend: 'postgres',
-      hyperdriveBinding: 'CUSTOM_HD',
-    })
+  it('adds D1-style get/all/run helpers to the Postgres query builders', async () => {
     const event = {
       context: {
         cloudflare: {
-          env: { CUSTOM_HD: { connectionString: 'postgres://test:test@localhost/db' } },
+          env: { HYPERDRIVE: { connectionString: 'postgres://test:test@localhost/db' } },
         },
       },
     }
     const db = useDatabase(event as never)
-    expect(db).toBeDefined()
-    expect(db).toEqual({ __mock: true, __backend: 'postgres' })
+
+    await expect(db.select().from('users').where('id').get()).resolves.toEqual({ id: 'u_1' })
+    await expect(db.select().from('users').where('id').all()).resolves.toEqual([
+      { id: 'u_1' },
+      { id: 'u_2' },
+    ])
+    await expect(db.update('users').set({}).where('id').run()).resolves.toEqual({ count: 1 })
+
+    expect(mockPgSelectExecute).toHaveBeenCalledTimes(2)
+    expect(mockPgUpdateExecute).toHaveBeenCalledTimes(1)
   })
 
   it('memoizes the PG instance on event.context._db', () => {
@@ -142,7 +153,6 @@ describe('useDatabase — Postgres backend', () => {
     const event = {
       context: { _db: existingDb },
     }
-    const db = useDatabase(event as never)
-    expect(db).toBe(existingDb)
+    expect(useDatabase(event as never)).toBe(existingDb)
   })
 })

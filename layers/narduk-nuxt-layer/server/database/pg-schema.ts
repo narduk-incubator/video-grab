@@ -1,20 +1,13 @@
 /**
- * PostgreSQL schema — pg-core equivalent of the layer's SQLite schema.
+ * PostgreSQL schema — pg-core mirror of `schema.ts` for Hyperdrive + `postgres.js`.
  *
- * Faithfully mirrors every table from `schema.ts` but uses
- * `drizzle-orm/pg-core` instead of `drizzle-orm/sqlite-core`.
- *
- * Column names are identical so Drizzle queries work unchanged regardless
- * of which backend (`d1` or `postgres`) the app is configured for.
- *
- * Apps that set `NUXT_DATABASE_BACKEND=postgres` should import from this file
- * in their `server/database/schema.ts` instead of from `schema.ts`.
+ * Column names match the SQLite schema so migrations and queries stay aligned.
+ * Build Workers with `NUXT_DATABASE_BACKEND=postgres` so `#layer/orm-tables` resolves here.
  */
 import { pgTable, text, integer, serial, boolean } from 'drizzle-orm/pg-core'
 
-// ─── Users ──────────────────────────────────────────────────
 export const users = pgTable('users', {
-  id: text('id').primaryKey(), // UUID
+  id: text('id').primaryKey(),
   email: text('email').notNull().unique(),
   passwordHash: text('password_hash'),
   name: text('name'),
@@ -28,19 +21,17 @@ export const users = pgTable('users', {
     .$defaultFn(() => new Date().toISOString()),
 })
 
-// ─── Sessions ───────────────────────────────────────────────
 export const sessions = pgTable('sessions', {
-  id: text('id').primaryKey(), // session token
+  id: text('id').primaryKey(),
   userId: text('user_id')
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
-  expiresAt: integer('expires_at').notNull(), // Unix timestamp
+  expiresAt: integer('expires_at').notNull(),
   createdAt: text('created_at')
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
 })
 
-// ─── Todos (Demo) ───────────────────────────────────────────
 export const todos = pgTable('todos', {
   id: serial('id').primaryKey(),
   userId: text('user_id')
@@ -53,42 +44,39 @@ export const todos = pgTable('todos', {
     .$defaultFn(() => new Date().toISOString()),
 })
 
-// ─── KV Cache ───────────────────────────────────────────────
 export const kvCache = pgTable('kv_cache', {
   key: text('key').primaryKey(),
   value: text('value').notNull(),
   expiresAt: integer('expires_at').notNull(),
 })
 
-// ─── API Keys ───────────────────────────────────────────────
 export const apiKeys = pgTable('api_keys', {
-  id: text('id').primaryKey(), // UUID
+  id: text('id').primaryKey(),
   userId: text('user_id')
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
-  name: text('name').notNull(), // Human label, e.g. "validate-fleet CLI"
-  keyHash: text('key_hash').notNull(), // SHA-256 of raw key
-  keyPrefix: text('key_prefix').notNull(), // First 8 chars for display: "nk_a1b2…"
+  name: text('name').notNull(),
+  keyHash: text('key_hash').notNull(),
+  keyPrefix: text('key_prefix').notNull(),
   lastUsedAt: text('last_used_at'),
-  expiresAt: integer('expires_at'), // Nullable unix timestamp
+  expiresAt: integer('expires_at'),
   createdAt: text('created_at')
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
 })
 
-// ─── Notifications ──────────────────────────────────────────
 export const notifications = pgTable('notifications', {
-  id: text('id').primaryKey(), // UUID
+  id: text('id').primaryKey(),
   userId: text('user_id')
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
-  kind: text('kind').notNull(), // 'system' | 'reminder' | 'social' | 'alert'
+  kind: text('kind').notNull(),
   title: text('title').notNull(),
   body: text('body').notNull(),
-  icon: text('icon'), // Optional lucide icon name, e.g. 'i-lucide-bell'
-  actionUrl: text('action_url'), // Optional deep-link path
-  resourceType: text('resource_type'), // Optional domain entity type (e.g. 'wager', 'order')
-  resourceId: text('resource_id'), // Optional domain entity ID
+  icon: text('icon'),
+  actionUrl: text('action_url'),
+  resourceType: text('resource_type'),
+  resourceId: text('resource_id'),
   isRead: boolean('is_read').notNull().default(false),
   readAt: text('read_at'),
   createdAt: text('created_at')
@@ -96,9 +84,8 @@ export const notifications = pgTable('notifications', {
     .$defaultFn(() => new Date().toISOString()),
 })
 
-// ─── System Prompts ─────────────────────────────────────────
 export const systemPrompts = pgTable('system_prompts', {
-  name: text('name').primaryKey(), // Simple string key, e.g., 'napkin_generator'
+  name: text('name').primaryKey(),
   content: text('content').notNull(),
   description: text('description').notNull(),
   updatedAt: text('updated_at')
@@ -106,7 +93,6 @@ export const systemPrompts = pgTable('system_prompts', {
     .$defaultFn(() => new Date().toISOString()),
 })
 
-// ─── Type helpers ───────────────────────────────────────────
 export type User = typeof users.$inferSelect
 export type NewUser = typeof users.$inferInsert
 export type Session = typeof sessions.$inferSelect

@@ -1,5 +1,5 @@
 import { requireAuth } from '#layer/server/utils/auth'
-import { apiKeys } from '#layer/server/database/schema'
+import { apiKeys } from '#layer/orm-tables'
 import { eq } from 'drizzle-orm'
 
 /**
